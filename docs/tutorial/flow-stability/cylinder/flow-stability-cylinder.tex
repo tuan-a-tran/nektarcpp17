@@ -1,0 +1,372 @@
+\input{tutorial-preamble.tex}
+
+\title{Global Stability Analysis: \\Cylinder Flow}
+
+\begin{document}
+
+%\frontmatter
+
+% Render pretty title page if not building HTML
+\ifdefined\HCode
+\begin{center}
+    \includegraphics[width=0.1\textwidth]{img/icon-blue.png}
+\end{center}
+\maketitle
+\begin{center}
+       \huge{Nektar++ Tutorial}
+\end{center}
+\else
+\titlepage
+\fi
+
+\clearpage
+
+%\ifx\HCode\undefined
+%\tableofcontents*
+%\fi
+%
+%\clearpage
+
+\chapter{Introduction}
+
+This tutorial further explores the use of the spectral/$hp$ element
+framework \nektar to perform global stability computations.
+Information on how to install the libraries, solvers, and utilities on your own
+computer is available on the webpage \href{http://www.nektar.info}{\underline{www.nektar.info}}.
+
+
+This tutorial assumes the reader has already completed the previous tutorial in the Flow Stability series on the channel and therefore already has the necessary software installed.
+
+\begin{tutorialtask}
+Prepare for the tutorial. Make sure that you have:
+\begin{itemize}
+   \item Downloaded the tutorial files: 
+       \relurl{flow-stability-cylinder.tar.gz}{flow-stability/cylinder}\\
+   Unpack it using
+   \inlsh{unzip flow-stability-cylinder.tar.gz}
+   to produce a directory \inlsh{flow-stability-cylinder} with subdirectories called \inlsh{tutorial} and
+   \inlsh{complete}
+   We will refer to the \inlsh{tutorial} directory
+   as \inlsh{\$NEKTUTORIAL}. 
+\end{itemize}
+\end{tutorialtask}
+
+In this tutorial we will compute the direct and adjoint modes of a
+two-dimensional flow past a cylinder. We will investigate a case in the
+subcritical regime ($Re=42$), below the onset of the Bernard-von K\"arm\"an
+vortex shedding that is observed when the Reynolds number is above the critical
+value $Re_c \simeq 47$; this analysis is important because it allows us to study
+the sensitivity of the flow, much like that reported by Giannetti and Luchini (
+J. Fluid Mech., 2007; \textbf{592}:177-194).  Due to the more complex nature of
+the flow and the more demanding computational time that is required, only some
+basic information will be presented in this section, mainly to show the potential
+of the code for stability analysis.
+
+The files contained in the \texttt{\$NEKTUTORIAL} directory are as follows:
+%
+\begin{itemize}
+\item Folder \texttt{geometry}
+\begin{itemize}
+\item  \texttt{Cylinder.geo} - \gmsh file that contains the geometry of the problem
+\item \texttt{Cylinder.msh} - \gmsh generated mesh data listing mesh vertices and 
+elements.
+\end{itemize}
+
+\item Folder \texttt{base}
+\begin{itemize}
+\item \texttt{Cylinder-Base.xml} - \nektar session file, generated with the
+\texttt{\$NEK/NekMesh} utility, for computing the base flow.
+\item \texttt{Cylinder-Base.fld} - \nektar field file that contains the base flow,
+generated using \\\texttt{Cylinder-Base.xml}.
+\end{itemize}
+
+\item Folder \texttt{stability/Direct}
+\begin{itemize}
+\item \texttt{Cylinder\_Direct.xml} - \nektar session file, generated with \texttt{\$NEK/NekMesh}.
+\item \texttt{Cylinder\_Direct.bse} - \nektar field file that contains the base flow. 
+\item \texttt{Cylinder\_Direct.rst} - \nektar field file that contains the initial conditions.
+\end{itemize}
+
+\item Folder \texttt{stability/Adjoint}
+\begin{itemize}
+\item \texttt{Cylinder\_Adjoint.xml} - \nektar session file, generated with \texttt{\$NEK/NekMesh}.
+\item \texttt{Cylinder\_Adjoint.bse} - \nektar field file that contains the base flow. 
+\item \texttt{Cylinder\_Adjoint.rst} - \nektar field file that contains the initial conditions.
+\end{itemize}
+
+\item Folder \texttt{stability/Receptivity}
+Pre-computed output files for calculating the receptivity.
+\end{itemize}
+%
+The mesh is shown in figure \ref{cylinder_direct} along with a detailed view 
+around the cylinder. This mesh is made up of 782 quadrilateral elements. 
+%
+\begin{figure}
+\centering
+\includegraphics[scale=0.4]{img/mesh_cyl}
+\caption{Mesh used for the direct stability analysis}
+\label{cylinder_direct}
+\end{figure}
+%
+
+\tutorialnote{It is important to note that stability and transient growth calculations 
+in particular, have a strong dependence on the domain size as reported by Cantwell
+and Barkley (Physical Review E, 2010; \textbf{82}); moreover, poor mesh design
+can lead to incorrect results. Specifically, the mesh must be sufficiently refined 
+around the cylinder in order to capture the separation of the flow and abrupt 
+variations in the size of the elements should be avoided.} 
+
+
+
+\chapter{Computation of the base flow} 
+\texttt{Cylinder-Base.xml} can be found inside the \texttt{\$NEKTUTORIAL/base} 
+folder. 
+This is the \nektar file generated using \texttt{\$NEK/NekMesh} and augmented 
+with all the configuration settings that are required. In this case, CFL conditions 
+can be particularly restrictive and the time step must be set around $8 \times 
+10^{-4}$. We will be using Reynolds number $Re=42$ for this study.
+
+The supplied file \texttt{Cylinder-Base.bse} is the converged base flow 
+required for the analysis and is the result of running \texttt{Cylinder-Base.xml}. 
+To have a steady solution it was necessary to evolve the fields for a non-dimensional 
+time $\tau\ge 300$ and it is very important to be sure that the solution is steady. 
+This can be verified by putting several history points on the centre line of the 
+flow and monitoring their variation.
+
+\begin{tutorialtask}
+Convert the base flow into VTK format and visualise the profile
+of the flow past a cylinder in \paraview.
+\end{tutorialtask}
+
+The base flow should look like the one in figure \ref{cyl_u}.
+%
+\begin{figure}
+\centering
+\includegraphics[scale=0.4]{img/cyl_u}
+\caption{Base flow for the cylinder test case}
+\label{cyl_u}
+\end{figure}
+%
+
+
+
+\chapter{Stability analysis}
+\section{Direct}
+In the folder \texttt{\$NEKTUTORIAL/stability/Direct} there are the
+files that are required for the direct stability analysis. Since, the computation would
+normally take several hours to converge, we will use a restart file and 
+a Krylov-space of just $\kappa=4$. Therefore, it will be possible to 
+obtain the eigenvalue and the corresponding eigenmode after 2 iterations.
+ 
+\begin{tutorialtask}
+Define a Kyrlov space of 4 and compute the leading 2 eigenvalues 
+and the eigenvectors of the problem using Arpack and the restart file
+\texttt{Cylinder\_Direct.rst}.
+\end{tutorialtask}
+
+The simulation should converge in 6 iterations and the terminal screen 
+should look similar to the one below:
+\begin{lstlisting}[style=BashInputStyle]
+=======================================================================
+	        EquationType: UnsteadyNavierStokes
+	        Session Name: Cylinder_Direct
+	        Spatial Dim.: 2
+	  Max SEM Exp. Order: 7
+	      Expansion Dim.: 2
+	     Projection Type: Continuous Galerkin
+	           Advection: explicit
+	           Diffusion: explicit
+	           Time Step: 0.0008
+	        No. of Steps: 1250
+	 Checkpoints (steps): 1000
+	    Integration Type: IMEXOrder2
+=======================================================================
+	Arnoldi solver type    : Arpack
+	Arpack problem type    : LM
+	Single Fourier mode    : false 
+	Beta set to Zero       : false 
+	Evolution operator     : Direct
+	Krylov-space dimension : 4
+	Number of vectors      : 2
+	Max iterations         : 500
+	Eigenvalue tolerance   : 1e-06
+======================================================
+Initial Conditions:
+  - Field u: from file Cylinder_Direct.rst
+  - Field v: from file Cylinder_Direct.rst
+  - Field p: from file Cylinder_Direct.rst
+Writing: "Cylinder_Direct_0.chk"
+	Inital vector       : input file  
+Iteration 0, output: 0, ido=1 Writing: "Cylinder_Direct_1.chk"
+Steps: 1250     Time: 1            CPU Time: 46.5477s
+Time-integration  : 46.5477s
+Writing: "Cylinder_Direct.fld"
+Iteration 1, output: 0, ido=1 Writing: "Cylinder_Direct_1.chk"
+Steps: 1250     Time: 2            CPU Time: 41.7221s
+Time-integration  : 41.7221s
+Iteration 2, output: 0, ido=1 Writing: "Cylinder_Direct_1.chk"
+Steps: 1250     Time: 3            CPU Time: 41.8717s
+Time-integration  : 41.8717s
+Iteration 3, output: 0, ido=1 Writing: "Cylinder_Direct_1.chk"
+Steps: 1250     Time: 4            CPU Time: 41.9465s
+Time-integration  : 41.9465s
+Iteration 4, output: 0, ido=1 Writing: "Cylinder_Direct_1.chk"
+Steps: 1250     Time: 5            CPU Time: 41.987s 
+Time-integration  : 41.987s
+Iteration 5, output: 0, ido=1 
+Writing: "Cylinder_Direct_1.chk"
+Steps: 1250     Time: 6            CPU Time: 42.2642s
+Time-integration  : 42.2642s
+Iteration 6, output: 0, ido=99 
+Converged in 6 iterations
+Converged Eigenvalues: 2
+         Magnitude   Angle       Growth      Frequency
+EV: 0 0.9792      0.726586    -0.0210196  0.726586    
+Writing: "Cylinder_Direct_eig_0.fld"
+EV: 1 0.9792      -0.726586   -0.0210196  -0.726586   
+Writing: "Cylinder_Direct_eig_1.fld"
+L 2 error (variable u) : 0.0501837
+L inf error (variable u) : 0.0296123
+L 2 error (variable v) : 0.0635524
+L inf error (variable v) : 0.0355673
+L 2 error (variable p) : 0.0344665
+L inf error (variable p) : 0.0176009
+\end{lstlisting}
+%
+\begin{tutorialtask}
+Verify that the leading eigenvalues show a growth rate of $\sigma=-2.10196
+\times 10^{-2}$ and a frequency  $\omega= \pm 7.26586  \times 10^{-1}$.
+\end{tutorialtask}
+%
+\begin{tutorialtask}
+Plot the leading eigenvector in \paraview or VisIt. This should look like the
+solution shown in figures \ref{cyl_eig}. 
+\end{tutorialtask}
+
+ %
+\begin{figure}
+\centering 
+\includegraphics[trim=80 0 0 0,clip,width=0.48\textwidth]{img/cyl_eig_u.png}
+\includegraphics[trim=80 0 0 0,clip,width=0.48\textwidth]{img/cyl_eig_v.png}
+\caption{$u'$-component and $v'$-component of the eigenmode}
+\label{cyl_eig}
+\end{figure}
+%
+
+
+\section{Adjoint}
+After the direct stability analysis, it is now interesting to compute the
+eigenvalues and eigenvectors of the adjoint operator $\mathcal{A}^*$ 
+that allows us to evaluate the effects of generic initial conditions and forcing 
+terms on the asymptotic behaviour of the solution of the linearised equations. 
+In the folder \texttt{Cylinder/Stability/Adjoint} there is the file
+\texttt{Cylinder\_Adjoint.xml} that is used for the adjoint analysis.
+
+\begin{tutorialtask}
+Set the \texttt{EvolutionOperator} to \texttt{Adjoint}, the Krylov space to 4 and 
+compute the leading eigenvalue and eigenmode of the adjoint operator, using 
+the restart file \texttt{Cylinder\_Adjoint.rst}
+\end{tutorialtask}
+
+The solution should converge after 4 iterations and the terminal screen should 
+look like this:
+%
+\begin{lstlisting}[style=BashInputStyle]
+=======================================================================
+	        EquationType: UnsteadyNavierStokes
+	        Session Name: Cylinder_Adjoint
+	        Spatial Dim.: 2
+	  Max SEM Exp. Order: 7
+	      Expansion Dim.: 2
+	     Projection Type: Continuous Galerkin
+	           Advection: explicit
+	           Diffusion: explicit
+	           Time Step: 0.001
+	        No. of Steps: 1000
+	 Checkpoints (steps): 1000
+	    Integration Type: IMEXOrder3
+=======================================================================
+	Arnoldi solver type    : Arpack
+	Arpack problem type    : LM
+	Single Fourier mode    : false 
+	Beta set to Zero       : false 
+	Evolution operator     : Adjoint
+	Krylov-space dimension : 4
+	Number of vectors      : 2
+	Max iterations         : 500
+	Eigenvalue tolerance   : 0.001
+======================================================
+Initial Conditions:
+Field p not found.
+  - Field u: from file Cylinder_Adjoint.rst
+  - Field v: from file Cylinder_Adjoint.rst
+  - Field p: from file Cylinder_Adjoint.rst
+Writing: "Cylinder_Adjoint_0.chk"
+	Inital vector       : input file  
+Iteration 0, output: 0, ido=1 Steps: 1000     Time: 27     CPU Time: 42.0192s
+Writing: "Cylinder_Adjoint_1.chk"
+Time-integration  : 42.0192s
+
+Writing: "Cylinder_Adjoint.fld"
+Iteration 1, output: 0, ido=1 Steps: 1000     Time: 28     CPU Time: 37.1084s
+Writing: "Cylinder_Adjoint_1.chk"
+Time-integration  : 37.1084s
+Iteration 2, output: 0, ido=1 Steps: 1000     Time: 29     CPU Time: 37.4794s
+Writing: "Cylinder_Adjoint_1.chk"
+Time-integration  : 37.4794s
+Iteration 3, output: 0, ido=1 Steps: 1000     Time: 30     CPU Time: 37.3142s
+Writing: "Cylinder_Adjoint_1.chk"
+Time-integration  : 37.3142s
+Iteration 4, output: 0, ido=99 
+Converged in 4 iterations
+Converged Eigenvalues: 2
+         Magnitude   Angle       Growth      Frequency
+EV: 0 0.980493    0.727526    -0.0197     0.727526    
+Writing: "Cylinder_Adjoint_eig_0.fld"
+EV: 1 0.980493    -0.727526   -0.0197     -0.727526   
+Writing: "Cylinder_Adjoint_eig_1.fld"
+L 2 error (variable u) : 0.434746
+L inf error (variable u) : 0.156905
+L 2 error (variable v) : 0.698425
+L inf error (variable v) : 0.120624
+L 2 error (variable p) : 0.216948
+L inf error (variable p) : 0.0676028
+\end{lstlisting}
+%
+\begin{tutorialtask}
+Verify that the eigenvalues of the system are $\lambda_{1,2}= 0.980495\times e^{\pm i 0.727502}$ 
+with a growth rate equal to $\sigma=-1.969727 \times 10^{-2}$ and a frequency $\omega=\pm 
+7.275024 \times 10^{-1}$. 
+\end{tutorialtask}
+
+\begin{tutorialtask}
+Plot the leading eigenmode in \paraview or VisIt that should look like figures
+\ref{cyl_adj_u} and \ref{cyl_adj_u}.
+\end{tutorialtask}
+
+Note that, in spatially developing flows, the eigenmodes of the direct stability operator 
+tend to be located far downstream while the eigenmodes of the adjoint operator
+tend to be located upstream and near to the body, as can be seen in figures
+\ref{cyl_adj_u} and \ref{cyl_adj_v}.
+From the profiles of the eigemodes, it can be deducted that the regions with the 
+maximum receptivity for the momentum forcing and mass injection are near the 
+wake of the cylinder, close to the upper and lower sides of the body surface, in 
+accordance with results reported in the literature.
+%
+\begin{figure}
+\centering
+\includegraphics[scale=0.3]{img/cyl_adj_u.png}
+\caption{Close-up of the $u^*$-component of the adjoint eigenmode.}
+\label{cyl_adj_u}
+\end{figure}
+%
+%
+\begin{figure}
+\centering
+\includegraphics[scale=0.3]{img/cyl_adj_v.png}
+\caption{The $v^*$-component of the adjoint eigenmode extends far upstream of the cylinder}
+\label{cyl_adj_v}
+\end{figure}
+%
+
+\end{document}

@@ -1,0 +1,524 @@
+\input{tutorial-preamble.tex}
+
+\title{Helmholtz Solver}
+
+\begin{document}
+
+%\frontmatter
+
+% Render pretty title page if not building HTML
+\ifdefined\HCode
+\begin{center}
+    \includegraphics[width=0.1\textwidth]{img/icon-blue.png}
+\end{center}
+\maketitle
+\begin{center}
+       \huge{Nektar++ Tutorial}
+\end{center}
+\else
+\titlepage
+\fi
+
+\clearpage
+
+%\ifx\HCode\undefined
+%\tableofcontents*
+%\fi
+%
+%\clearpage
+
+\chapter{Introduction}
+
+Welcome to the tutorial on solving the Helmholtz problem using the
+Advection-Diffusion-Reaction (ADR) Solver in the \nektar framework.
+This tutorial is aimed to show the main features of the ADR solver in
+a simple manner. If you have not already downloaded and installed
+\nektar, please do so by
+visiting \href{http://www.nektar.info}{http://www.nektar.info}, where you can
+also find the
+\href{http://www.nektar.info/downloads/8}{User-Guide} with the
+instructions to install the library.
+
+This tutorial requires:
+\begin{itemize}
+    \item \nektar ADRSolver and pre- and post-processing tools,
+    \item the open-source mesh generator \href{http://geuz.org/gmsh/}{Gmsh},
+    \item the visualisation tool \href{http://www.paraview.org}{\underline{Paraview}}
+or \href{https://wci.llnl.gov/simulation/computer-codes/visit/downloads}{\underline{VisIt}}
+\end{itemize}
+
+\section*{Goals}
+After the completion of this tutorial, you will be familiar with:
+\vspace{-0.5cm}
+\begin{itemize}
+\item the generation of a simple mesh in Gmsh and its conversion into a \nektar-compatible format;
+\item the visualisation of the mesh in Paraview or VisIt
+\item the setup of the initial and boundary conditions, the parameters and the solver settings;
+\item running a simulation with the ADR solver; and
+\item the post-processing of the data for a convergence plot and the visualisation of the results in Paraview or VisIt.
+\end{itemize}
+
+\begin{tutorialtask}
+Prepare for the tutorial. Make sure that you have:
+\begin{itemize}
+  \item Installed and tested \nektar v\nekver from a binary package, or compiled it from
+      source. By default binary packages will install all executables in
+      \inlsh{/usr/bin}. If you compile from source they will be in the
+      sub-directory \inlsh{dist/bin} of the \inlsh{build} directory you 
+      created in the \nektar source tree. We will refer to the directory
+      containing the executables as \inlsh{\$NEK} for the remainder of the
+      tutorial.
+   \item Downloaded the tutorial files: 
+       \relurl{basics-helmholtz.tar.gz}{basics/helmholtz}\\
+   Unpack it using \inlsh{tar -xzvf basics-helmholtz.tar.gz} to produce
+   a directory \inlsh{basics-helmholtz} with subdirectories
+   called \inlsh{tutorial} and \inlsh{complete}.
+   
+   We will refer to the \inlsh{tutorial} directory as \inlsh{\$NEKTUTORIAL}.
+
+The tutorial folder contains: 
+\begin{itemize}
+\item a Gmsh file to generate the mesh, \inlsh{Helm\_mesh.geo};
+\item a .msh file containing the mesh in Gmsh format, \inlsh{Helm\_mesh.msh};
+\end{itemize}
+
+\end{itemize}
+\end{tutorialtask}
+
+\begin{tutorialtask}
+Additionally, you should also install
+\begin{itemize}
+  \item a visualization package capable of reading VTK files, such as ParaView
+  (which can be downloaded from
+  \href{http://www.paraview.org/download/}{\underline{here}}) or VisIt
+  (downloaded from 
+  \href{https://wci.llnl.gov/simulation/computer-codes/visit/downloads}{\underline{here}}).
+  Alternatively, you can generate Tecplot formatted .dat files for use with
+  Tecplot.
+  %\item a plotting program capable of reading data from ASCII text files, such
+  %as GNUPlot or MATLAB.
+\end{itemize}
+\end{tutorialtask}
+
+\section{Background}
+The ADR solver can solve various problems, including the unsteady
+advection, unsteady diffusion, unsteady advection diffusion equation,
+etc. For a more detailed description of this solver, please refer to
+the \href{http://www.nektar.info/downloads/8}{User-Guide}.
+
+In this tutorial we focus on the Helmholtz equation
+\begin{equation}
+\nabla^2 u - \lambda u = f,
+\label{eq:helmholtz}
+\end{equation}
+where $u$ is the independent variable. The Helmholtz equation
+can be solved in one, two and three spatial dimensions. We will here
+consider a two-dimensional problem. 
+
+\section{Problem description}
+The problem we want to solve consists of known boundary conditions and
+forcing function which depend on $x$ and $y$. To model this problem we
+create a computational domain also referred to as mesh or grid (see
+section \ref{helm-pre}) on which we apply the following two-dimensional
+function with Dirichlet and Neumann boundary conditions. 
+%
+\begin{equation}
+\begin{array}{l}
+\nabla^2 u - \lambda u =  -(2\pi^2 + \lambda) \cos(\pi x) \cos(\pi y) ,\\[1em]
+u(x,y) = \cos(\pi x) \cos(\pi y),\\[1em]
+u(x_{b} = \pm 1,y_{b}) = \cos(\pi x_{b}) \cos(\pi y_b),\\[1em]
+\dfrac{\partial }{dn} u(x_{b},y_{b} = \pm 1)  =  \pm \dfrac{\partial }{dy} u(x_{b},y_{b} = \pm 1) = \mp \pi \left [\cos(\pi x_{b}) \sin(\pi y_b) \right ]
+\end{array}
+\label{eq:advection-2d}
+\end{equation}
+%
+where $x_{b}$ and $y_{b}$ represent the boundaries of the
+computational domain (see section \ref{helm-configuring}) and
+$\lambda$ is a positive constant.
+
+We will set the boundary conditions and forcing function for this
+solver (see section \ref{helm-configuring}) then, after running the
+solver (see section \ref{helm-running}) we will post-process the data in
+order to visualise the results (see section \ref{helm-post}).
+
+\chapter{Pre-processing}
+\label{helm-pre}
+The pre-processing step consists of generating the mesh in a \nektar
+compatible format.  To do this we can use the open-source
+mesh generator Gmsh to first define the geometry, which in our case is
+a square mesh. The resulting mesh is shown in Fig. \ref{f:gmsh}. The mesh
+file format (.msh) generated by Gmsh is not directly compatible with the
+\nektar solvers and, therefore, it needs to be converted.
+%
+\begin{figure}[h!]
+\begin{center}
+\includegraphics[width=5cm]{img/Helm_mesh_gmsh}
+\caption{Mesh generated by Gmsh.}
+\label{f:gmsh}
+\end{center}
+\end{figure}
+%
+To do so, we need to run the \nektar pre-processing routine
+called \inltt{NekMesh}.  This routine requires two
+command-line arguments: the mesh file generated by
+Gmsh, \inlsh{Helm\_mesh.msh}; and the name of the \nektar-compatible
+mesh file that \inltt{NekMesh} will generate, for
+instance \inlsh{Helm\_mesh.xml}.
+%
+\begin{tutorialtask}
+Convert the .msh file into a Nektar++ input from within the
+    \inlsh{\$NEKTUTORIAL} directory by calling
+\tutorialcommand{\$NEK/NekMesh Helm\_mesh.msh  Helm\_mesh.xml}
+or 
+\tutorialcommand{\$NEK/NekMesh Helm\_mesh.msh  Helm\_mesh.xml:xml:uncompress}
+\end{tutorialtask}
+%
+Note that by default the information is stored in XML blocks of
+compressed data to reduce the size of large meshes. The second command
+above tells the converter \inltt{NekMesh} to write the file out in
+uncompressed ASCII format.  The generated .xml mesh file is shown below
+and can also be found in the \inlsh{completed} directory.  It contains
+5 tags encapsulated within the \inltt{GEOMETRY} tag, which describes
+the mesh.  The first tag, \inltt{VERTEX}, contains the spatial
+coordinates of the vertices of the various elements of the mesh. The
+second tag, \inltt{EDGE} contains the lines connecting the vertices.
+The third tag, \inltt{ELEMENT}, defines the elements (note that in
+this case we have both triangular - e.g. \inltt{<T ID="0">} - as well
+as quadrilateral - e.g. \inltt{<Q ID="85">} - elements). The fourth
+tag, \inltt{COMPOSITE}, describes the physical regions of the
+mesh and each composite may contain only one type of mesh entity. There are
+three composites composed of triangular or quadrilateral elements
+which represent the solution sub-domains where we want to solve the linear
+advection problem. We will use these composites to define expansion bases on
+each sub-domain in section \ref{helm-configuring}. The composites
+formed by edges are the boundaries of the domain where we will prescribe
+suitable boundary conditions in section \ref{helm-configuring}.
+Finally, the fifth
+tag, \inltt{DOMAIN}, formally specifies the overall solution domain as
+the union of the three element composites. For additional details on
+the \inltt{GEOMETRY} specification refer to
+the \href{http://www.nektar.info/downloads/8}{User-Guide}.
+%
+\begin{lstlisting}[style=XMLStyle]
+<?xml version="1.0" encoding="utf-8" ?>
+<NEKTAR>
+    <GEOMETRY DIM="2" SPACE="2">
+        <VERTEX>
+            <V ID="0">2.00000000e-01 -1.00000000e+00 0.00000000e+00</V>
+            <V ID="1">5.09667784e-01 -6.15240515e-01 0.00000000e+00</V>
+            ...
+            <V ID="68">-1.00000000e+00 1.25000000e-01 0.00000000e+00</V>
+        </VERTEX>
+        <EDGE>
+            <E ID="0">    0  1   </E>
+            <E ID="1">    1  2   </E>
+            ...
+            <E ID="153">   40  68   </E>
+        </EDGE>
+        <ELEMENT>
+            <T ID="0">    0     1     2 </T>
+            <T ID="1">    3     4     5 </T>
+            ...
+            <Q ID="85">  146    93   153   151 </Q>
+       </ELEMENT>
+        <COMPOSITE>
+            <C ID="1"> T[0-30] </C>
+            <C ID="2"> Q[62-85] </C>
+            <C ID="3"> T[31-61] </C>
+            <C ID="100"> E[46,12,20,10,45] </C>
+            <C ID="200"> E[50,32,108,111,114,117,87,103] </C>
+            <C ID="300"> E[100,64,74,66,99] </C>
+            <C ID="400"> E[49,33,148,150,152-153,86,104] </C>
+        </COMPOSITE>
+        <DOMAIN> C[1,2,3] </DOMAIN>
+    </GEOMETRY>
+</NEKTAR>
+\end{lstlisting}      
+%
+After generating the mesh file in the \nektar-compatible
+format, \inlsh{Helm\_mesh.xml}, we can visualise the mesh.  This
+step can be done by using the following \nektar built-in
+post-processing routine:
+%
+\begin{tutorialtask} Convert the .xml file into a .vtu format within the
+    \inlsh{\$NEKTUTORIAL} directory by calling
+\tutorialcommand{\$NEK/FieldConvert Helm\_mesh.xml  Helm\_mesh.vtu}
+Alternatively a tecplot .dat file can be created by changing the extension of the second file, i.e. 
+\tutorialcommand{\$NEK/FieldConvert Helm\_mesh.xml  Helm\_mesh.dat}
+\end{tutorialtask}
+%
+This will produce a \inlsh{Helm\_mesh.vtu} file which can be directly
+read by the open-source visualisation tool called Paraview or VisIt. In
+Fig. \ref{f:Mesh} we show the mesh distribution for the mesh
+considered in this tutorial, \inlsh{Helm\_mesh.xml}.
+%
+\begin{figure}[h!]
+\begin{center}
+\includegraphics[width=0.4\textwidth]{img/Helm_mesh}
+\caption{Mesh distribution with local polynomial subdivision}
+\label{f:Mesh}
+\end{center}
+\end{figure}
+%
+We can now configure the conditions: initial conditions,
+boundary conditions, parameters and solver settings.
+
+\section{Configuring the expansion bases and the conditions}
+\label{helm-configuring}
+
+To set the various parameters, the solver settings and the initial and
+boundary conditions needed, we create a new file
+called \inltt{Helm\_conditions.xml}, which can be found within the
+\inlsh{completed} directory for this tutorial.  This new file contains
+the \inltt{CONDITIONS} tag where we can specify the parameters of the
+simulations, the solver settings, the initial conditions, the boundary
+conditions and the exact solution and contains the \inltt{EXPANSIONS}
+tag where we can specify the polynomial order to be used inside each
+element of the mesh, the type of expansion bases and the type of
+points.
+
+We begin to describe the \inltt{Helm\_conditions.xml} file from
+the \inltt{CONDITIONS} tag, and in particular from the boundary
+conditions, initial conditions and exact solution sections:
+%
+\begin{lstlisting}[style=XMLStyle]
+<CONDITIONS>
+    ...
+    ...
+    ...
+    <VARIABLES>
+        <V ID="0"> u </V>
+    </VARIABLES>
+        
+    <BOUNDARYREGIONS>
+        <B ID="0"> C[100] </B>
+        <B ID="1"> C[200] </B>
+        <B ID="2"> C[300] </B>
+        <B ID="3"> C[400] </B>
+    </BOUNDARYREGIONS>
+        
+    <BOUNDARYCONDITIONS>
+        <REGION REF="0">
+            <N VAR="u" VALUE="-PI*cos(PI*x)*sin(PI*y)" />
+        </REGION>
+        <REGION REF="1">
+            <D VAR="u" VALUE="cos(PI*x)*cos(PI*y)" />
+        </REGION>
+        <REGION REF="2">
+            <N VAR="u" VALUE="PI*cos(PI*x)*sin(PI*y)" />
+        </REGION>
+        <REGION REF="3">
+            <D VAR="u" VALUE="cos(PI*x)*cos(PI*y)" />
+        </REGION>
+    </BOUNDARYCONDITIONS>
+        
+    <FUNCTION NAME="Forcing">
+        <E VAR="u" VALUE="-(Lambda + 2*PI*PI)*cos(PI*x)*cos(PI*y)" />
+    </FUNCTION>
+
+    <FUNCTION NAME="ExactSolution">
+        <E VAR="u"  VALUE="cos(PI*x)*cos(PI*y)" />
+    </FUNCTION>
+</CONDITIONS>
+\end{lstlisting}
+%
+In the above piece of \inltt{.xml}, we first need to specify the
+non-optional tag called \inltt{VARIABLES} that sets the solution
+variable (in this case $u$).
+
+The second tag that needs to be specified is \inltt{BOUNDARYREGIONS}
+through which the user can specify the regions where to apply the
+boundary conditions.  For instance, \inltt{<B ID="0"> C[100] </B>}
+indicates that composite 100 (which has been introduced in
+section \ref{helm-pre}) has a \textbf{boundary ID} equal to 0. This
+boundary ID is successively used to prescribe the boundary conditions.
+
+The third tag is \inltt{BOUNDARYCONDITIONS} by which the boundary
+conditions are actually specified for each \textbf{boundary ID}
+specified in the \inltt{BOUNDARYREGIONS} tag. The syntax \inltt{<D
+VAR="u"} corresponds to a \inltt{D}irichlet boundary condition for the
+variable \inltt{u}, while \inltt{<N VAR="u"} corresponds
+to \inltt{N}eumann boundary conditions. For additional details on the
+various options possible in terms of boundary conditions refer to
+the \href{http://www.nektar.info/downloads/8}{User-Guide}.
+
+Finally, \inltt{<FUNCTION NAME="Forcing">} allows the
+specification of the Forcing function and
+\inltt{<FUNCTION NAME="ExactSolution">} permits us to provide the
+exact solution, against which the L$_{2}$ and L$_{\infty}$ errors are
+computed.
+
+After having configured the \inltt{VARIABLES} tag, the boundary
+conditions, the forcing function  and the exact solution we can
+complete the tag \inltt{CONDITIONS} prescribing the parameters
+necessary (\inltt{PARAMETERS})and the solver settings
+(\inltt{SOLVERINFO}):
+%
+\begin{lstlisting}[style=XMLStyle]
+<CONDITIONS>
+    <PARAMETERS>
+        <P> Lambda	= 2.5       </P>
+    </PARAMETERS>
+        
+    <SOLVERINFO>
+        <I PROPERTY="EQTYPE"             VALUE="Helmholtz"      />
+        <I PROPERTY="Projection"         VALUE="Continuous"     />
+    </SOLVERINFO>
+    ...
+    ...
+    ...
+\end{lstlisting}
+%
+In the \inltt{PARAMETERS} tag, \inltt{Lambda} is the Helmholtz
+constant $\lambda$. 
+
+In the \inltt{SOLVERINFO} tag, \inltt{EQTYPE} is the type of equation
+to be solved, \inltt{Projection} is the spatial projection operator to
+be used (which in this case is specified to be `Continuous') For
+additional solver-setting options refer to
+the \href{http://www.nektar.info/downloads/8}{User-Guide}.
+
+Finally, we need to specify the expansion bases we want to use in each
+of the three composites or sub-domains (\inltt{COMPOSITE=".."})
+introduced in section \ref{helm-pre}:
+%
+\begin{lstlisting}[style=XMLStyle]
+<EXPANSIONS>
+    <E COMPOSITE="C[1]" NUMMODES="5" TYPE="MODIFIED" FIELDS="u" />
+    <E COMPOSITE="C[2]" NUMMODES="5" TYPE="MODIFIED" FIELDS="u" />
+    <E COMPOSITE="C[3]" NUMMODES="5" TYPE="MODIFIED" FIELDS="u" />
+</EXPANSIONS>
+\end{lstlisting}
+%
+In particular, for all the composites, \inltt{COMPOSITE="C[i]"} with
+i=1,2,3 we select identical basis functions and polynomial order,
+where \inltt{NUMMODES} is the number of coefficients we want to use
+for the basis functions (that is commonly equal to P+1 where P is the
+polynomial order of the basis functions), \inltt{TYPE} allows
+selecting the basis functions \inltt{FIELDS} is the solution variable
+of our problem and \inltt{COMPOSITE} are the mesh regions created by
+Gmsh. For additional details on the \inltt{EXPANSIONS} tag refer to
+the \href{http://www.nektar.info/downloads/8}{User-Guide}.
+
+\begin{tutorialtask}
+Generate the file \inlsh{Helm\_conditions.xml} in the directory
+\inlsh{\$NEKTUTORIAL} with $\lambda=2.5$ or copy it from the \inlsh{completed}
+directory.
+\end{tutorialtask}
+
+
+\chapter{Running the solver}
+\label{helm-running}
+Now that we have the mesh file compatible with Nektar++ which will support periodic boundary conditions,
+\inlsh{Helm\_mesh.xml}, and we have completed the condition file,
+\inlsh{Helm\_conditions.xml}, we can run the solver by using the following command:
+%
+\begin{tutorialtask}
+Run the ADRSolver in the directory \$NEKTUTORIAL using the command:
+\tutorialcommand{\$NEK/ADRSolver Helm\_mesh.xml
+    Helm\_conditions.xml}
+\end{tutorialtask}
+%
+Note that we have written the mesh in a separate file from the
+conditions. This is generally more efficient because it allows
+reopening just the condition file which is much smaller in size than
+the mesh file (especially for large problems). However, we could also
+have written both the mesh and the conditions in unique file and used
+the same command as above for running the solver (in this case with
+just one file instead of two as line argument).
+
+As soon as the file finishes running, we should see the following
+screen output:
+%
+\begin{lstlisting}[style=BashInputStyle]
+=======================================================================
+	        EquationType: Helmholtz
+	        Session Name: Helm_mesh
+	        Spatial Dim.: 2
+	  Max SEM Exp. Order: 5
+	      Expansion Dim.: 2
+	     Projection Type: Continuous Galerkin
+	              Lambda: 2.5
+	    Forcing func [0]: -(Lambda + 2*PI*PI)*cos(PI*x)*cos(PI*y)
+=======================================================================
+Writing: "Helm_mesh.fld"
+Writing: "Helm_mesh.fld"
+-------------------------------------------
+Total Computation Time = 0s
+-------------------------------------------
+L 2 error (variable u) : 0.000159378
+L inf error (variable u) : 0.000454467
+\end{lstlisting}
+%
+where the L2 and L inf errors are evaluated against
+the \inltt{<FUNCTION NAME="ExactSolution">} provided in
+the \inlsh{Helm\_conditions.xml} file. To have a more detailed view on
+the solver settings and parameters used, it is possible to use
+the \inltt{-v} option (which stands for verbose) as follows:
+%
+\begin{tutorialtask}
+Rerun the \inlsh{ADRSolver} with the verbose option: 
+\tutorialcommand{\$NEK/ADRSolver -v  Helm\_mesh.xml Helm\_conditions.xml}
+\end{tutorialtask}
+
+%
+The simulation has now produced a final \inlsh{.fld} binary file.
+
+\chapter{Post-processing}
+\label{helm-post}
+Now that the simulation has been completed, we need to post-process
+the file in order to visualise the results. In order to do so, we can
+use the built-in post-processing routines within Nektar++.  In
+particular, we can use the following command
+%
+\begin{tutorialtask} In the \inlsh{\$NEKTUTORIAL} directory convert the .xml and .chk files into a .vtu format
+by calling
+\tutorialcommand{\$NEK/FieldConvert
+    Helm\_mesh.xml Helm\_conditions.xml Helm\_mesh.fld Helm\_mesh.vtu}
+\end{tutorialtask}
+%
+which generates a \inlsh{.vtu} file that is a readable format for the
+open-source package Paraview or VisIt.  Note that we typically have to
+specify both the mesh \inlsh{.xml} file and the condition \inlsh{.xml}
+file. We can now open the \inlsh{.vtu} file just generated. This
+produces the image in Fig.~(\ref{f:soln}).
+%
+\begin{figure}[h!]
+\begin{center}
+\includegraphics[width=5cm]{img/Helm_soln}
+\caption{Helmholtz solution}
+\label{f:soln}
+\end{center}
+\end{figure}
+%
+
+\chapter{Summary}
+You should be now familiar with the following topics:
+\vspace{-0.5cm}
+\begin{itemize}
+\item Generate a simple mesh in Gmsh and convert it in a Nektar++-compatible format;
+\item Visualise the  mesh in Paraview;
+\item Setup the boundary conditions, the parameters and the solver settings;
+\item Run the ADR solver; and
+\item Post-process the data in order to visualise results in Paraview/VisIt.
+\end{itemize}
+
+
+\section{Additional Exercises}
+\begin{enumerate}
+\item Increase the polynomial order and plot the L$_{2}$ error vs. the polynomial order in a semilogarithmic scale.
+\item If the solver is compiled with the MPI option, then try running the case in parallel 
+with \inlsh{mpirun -np 2}.
+\item Change the Projection Operator to DisContinuous to see the same problem running with an HDG solver.
+\item Change one of the boundary conditiosn to a Robin (Mixed) boundary
+    condition of the form $\partial u/\partial n = \alpha u + \beta$ whith $\alpha =1$ and $\beta$ determined from the exact solution. 
+\end{enumerate}
+
+\begin{tipbox}
+To check the additional settings and parameters that can be used for
+this solver, check the folder: \inlsh{\$NEK/solvers/ADRSolver/Tests/}
+where you can find several tests associated to the ADR solver.
+\end{tipbox}
+
+
+\end{document}

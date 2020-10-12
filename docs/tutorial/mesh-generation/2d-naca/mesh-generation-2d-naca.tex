@@ -1,0 +1,226 @@
+\input{tutorial-preamble.tex}
+
+\title{NekMesh: High-order mesh generation (NACA)}
+
+\begin{document}
+
+%\frontmatter
+
+% Render pretty title page if not building HTML
+\ifdefined\HCode
+\begin{center}
+    \includegraphics[width=0.1\textwidth]{img/icon-blue.png}
+\end{center}
+\maketitle
+\begin{center}
+  \huge{Nektar++ Tutorial}
+\end{center}
+\else
+\titlepage
+\fi
+
+\clearpage
+
+\chapter{Introduction}
+
+This tutorial covers a new feature of NekMesh introduced in the two-dimensional
+mesh generator. This feature focuses on the creation of a NACA profile surrounded
+by a rectangular bounding box as well as its meshing.
+
+\begin{tipbox}
+  This feature is an advanced functionality of NekMesh and the reader is advised
+  to first complete the standard NekMesh tutorial \inlsh{NekMesh: High-order mesh
+  generation (from STEP)} before proceeding. This chapter however includes a
+  reminder of the steps required to generate a mesh and run the solver.
+\end{tipbox}
+
+To achieve the goals of this tutorial you will need an installation of the
+latest \texttt{master} version of Nektar++, available at
+\href{http://www.nektar.info}{nektar.info}. This is because the features you
+will be using are relatively new and have yet to be included in the latest
+release. Standard installation instructions are applicable as described in the
+\href{http://www.nektar.info/downloads/8}{user guide}, with one addition that
+CMake should be configured to include \inlsh{NEKTAR\_USE\_MESHGEN=ON}. This will
+activate the installation of the relevant meshing routines.
+
+\begin{tipbox}
+  When using the mesh generation routines Nektar++ will require an OpenCascade
+  installation to be present on your machine. Nektar++ is capable of downloading
+  and installing OpenCascade for you, but this is highly not recommended as the
+  installation time is very large. OpenCascade Community Edition (OCE) can be
+  installed through package managers:
+
+  \begin{itemize}
+    \item \textbf{Homebrew:} \texttt{brew install homebrew/science/oce}
+    \item \textbf{MacPorts:} \texttt{port install oce}
+    \item \textbf{Ubuntu/Debian:} \texttt{sudo apt-get install liboce-foundation-dev liboce-modeling-dev}
+    \item Other Linux installations have a version of OCE in their package manager,
+          usually called \texttt{liboce}.
+  \end{itemize}
+
+  Nektar++ will be able to pick up on any of these OCE
+  installations. Installation of NekMesh on Windows with mesh generation is not
+  possible due to the OpenCascade requirements at this time.
+\end{tipbox}
+
+This tutorial additionally requires:
+\begin{itemize}
+    \item Nektar++ IncNavierStokesSolver with pre- and post-processing tools,
+    \item A visualisation tool such as \href{http://www.paraview.org}{\underline{Paraview}}
+    or
+    \href{https://wci.llnl.gov/simulation/computer-codes/visit/downloads}{\underline{VisIt}}
+\end{itemize}
+
+\section{Goals}
+After the completion of this tutorial, you will be familiar with:
+\vspace{-0.5cm}
+\begin{itemize}
+\item the generation of a 2D mesh from the NACA generator;
+\item the visualisation of the mesh in Paraview or VisIt
+\item running a simple simulation on this mesh with IncNavierStokesSolver; and
+\item the post-processing of the data and the visualisation of the results in
+Paraview or VisIt.
+\end{itemize}
+
+\begin{tutorialtask}
+Prepare for the tutorial. Make sure that you have:
+\begin{itemize}
+  \item Installed and tested \nektar v\nekver{} compiled from source. We will
+  refer to the directory where you installed \nektar as \inlsh{\$NEK} for
+  the remainder of the tutorial.
+  \item Make a directory of your choosing, for example \inlsh{tutorial}, and
+  download the tutorial files from
+  \relurl{mesh-generation-2d-naca.tar.gz}{mesh-generation/2d-naca} into this
+  directory.
+
+  \item Unpack the tutorial files by using \tutorialcommand{tar -xzvf
+    mesh-generation-2d-naca.tar.gz} to produce a directory \inlsh{2d-naca} with
+  subdirectories called \inlsh{tutorial} and \inlsh{complete}.
+\end{itemize}
+\end{tutorialtask}
+
+
+The tutorial folder contains:
+\begin{itemize}
+\item an .mcf file;
+\item a session file which will run the NACA mesh.
+\end{itemize}
+
+\chapter{NACA wing}
+
+An additional feature of the 2D capabilities of NekMesh is to generate meshes of
+NACA wings without the need for a CAD file. By listing the \texttt{CADFile}
+parameter as a 4 digit NACA code in the .mcf, NekMesh will generate the NACA
+wing. Additional parameters about the domain are required, that define the
+minimum and maximum x- and y-coordinates for the grid and the angle of attack of
+the wing:
+
+\begin{lstlisting}[style=XMLStyle]
+    <P PARAM="Xmin"     VALUE="-1.0"    />
+    <P PARAM="Ymin"     VALUE="-1.0"    />
+    <P PARAM="Xmax"     VALUE="3.0"     />
+    <P PARAM="Ymax"     VALUE="1.0"     />
+    <P PARAM="AOA"      VALUE="15.0"    />
+\end{lstlisting}
+
+The mesh we make is for a simple NACA 6412 profile in a rectangular domain.
+
+\begin{tutorialtask}
+  Create a triangular mesh according to the .mcf provided in the tutorial
+  folder. To make this mesh, run the command
+  %
+  \tutorialcommand{\$NEK/NekMesh naca.mcf naca.xml}
+  %
+  More details about the generation process can be seen by enabling the
+  \emph{verbose} command line option \inltt{-v}:
+  %
+  \tutorialcommand{\$NEK/NekMesh -v naca.mcf naca.xml}
+\end{tutorialtask}
+
+This will produce a Nektar++ mesh, which we now need to visualise.
+
+\begin{tutorialtask}
+  Visualise the mesh using FieldConvert. For Tecplot output for
+  visualisation in VisIt, run the command
+  %
+  \tutorialcommand{\$NEK/FieldConvert naca.xml naca.dat}
+  %
+  or, for VTK output, for visualisation in ParaView or VisIt, run the command
+  %
+  \tutorialcommand{\$NEK/FieldConvert naca.xml naca.vtu}
+\end{tutorialtask}
+
+As these meshes are converted to a linear mesh, since this is what the
+visualisation software supports, the curved elements can look quite faceted. To
+counteract this, we can add an optional \inlsh{-nX} command line option to
+FieldConvert, which increases the number of subdivisions used to view the
+elements through interpolation.
+
+\begin{tutorialtask}
+  Run the command
+  %
+  \tutorialcommand{\$NEK/FieldConvert -n 8 naca.xml naca.vtu}
+  %
+  and visualise the output, which should now look far smoother around the
+  aerofoil's leading edge and give a better visualisation of the high-order
+  elements.
+\end{tutorialtask}
+
+The .mcf has already been configured for the generation of a sufficiently fine
+mesh. Among others, it includes a boundary layer mesh as well as a refinement
+region in the wake of the aerofoil.
+We can now try to run some simulations on this mesh. A session file
+\inlsh{session\_naca.xml} for the aerofoil mesh is provided, which will execute a
+low Reynolds number incompressible simulation. The resulting flow field should
+look like in Fig.~\ref{f:naca}.
+
+\begin{tutorialtask}
+  Execute the solver with
+  \tutorialcommand{\$NEK/IncNavierStokesSolver naca.xml session\_naca.xml}
+  Process the final flow field visualisation with
+  \tutorialcommand{\$NEK/FieldConvert naca.xml naca.fld naca.vtu}
+  and visualise the results.
+\end{tutorialtask}
+
+\begin{figure}
+  \begin{center}
+    \includegraphics[width=0.5\textwidth]{img/naca.png}
+    \caption{Visualisation of streamwise velocity field at $t=2.5$.}
+    \label{f:naca}
+  \end{center}
+\end{figure}
+
+It is possible to visualise the unsteady flow by getting the solver to write
+checkpoint files every certain number of timesteps. The output frequency is
+controlled by the parameter
+\begin{lstlisting}[style=XMLStyle]
+  <P> IO_CheckSteps = 50 </P>
+\end{lstlisting}
+
+\begin{tutorialtask}
+  Rerun the solver with the checkpoint I/O turned on, by enabling the parameter
+  in the parameters tag in the session file. Re-run the solver with
+  %
+  \tutorialcommand{\$NEK/IncNavierStokesSolver naca.xml session\_naca.xml}
+  %
+  Finally, process these checkpoint files for visualisation by using the command
+  %
+  \tutorialcommand{for i in \{0..100\}; do \$NEK/FieldConvert naca.xml
+    naca\_\$\{i\}.chk naca\_\$\{i\}.vtu; done}
+  %
+  Note that this is a \texttt{bash} command -- if you use an alternative shell,
+  such as \texttt{tcsh}, you may need to alter this syntax. Load the files into
+  your visualiser as a group, and use the frame functions to view the flow as an
+  unsteady animation.
+\end{tutorialtask}
+
+Following these first 2 tutorials on two-dimensional high-order mesh generation
+using NekMesh, the reader should now be able to modify the mesh configuration
+file according to their needs.
+
+\begin{tutorialtask}
+  Change the mesh and solver parameters to produce different meshes and flow
+  results, so that the wake can be captured accurately.
+\end{tutorialtask}
+
+\end{document}

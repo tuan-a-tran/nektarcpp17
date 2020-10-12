@@ -1,0 +1,809 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage{tikz}
+\usepackage[top=2cm,bottom=3cm,left=1.5cm,right=1.5cm]{geometry}
+\usepackage[lined,algo2e,boxed]{algorithm2e}
+\usepackage{listings}
+\usepackage{amsmath}
+
+\title{Hydrodynamic stability analysis using $Nektar++$}
+\author{AIM-ED}
+\date{23rd August 2011}
+
+\newcounter{taskcount}[section]
+\newcommand\gmsh{\emph{Gmsh}~}
+\newcommand\paraview{\emph{Paraview}}
+\newcommand\nektar{\emph{Nektar++~}}
+\newcommand\tutorialpath{\texttt{/export/aim/nektutorial/}}
+\newcommand\tutorialtask[1]{
+    \addtocounter{taskcount}{1}
+    \begin{center}
+        \setlength{\fboxsep}{10pt}
+        \colorbox{LightGrey}{
+            \parbox{0.95\linewidth}{\textbf{Task
+            \arabic{section}.\arabic{taskcount}}\par #1} }
+    \end{center}
+}
+\newcommand\tutorialcommand[1]{
+    \par{\vspace{1ex}
+         \addtolength{\leftskip}{5mm}\texttt{#1}\par\vspace{1ex}}
+}
+\newcommand\tutorialnote[1]{\par{\textbf{Note: }#1}}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1ex} 
+\definecolor{LightGrey}{rgb}{0.9,0.9,0.9}
+
+\begin{document}
+\maketitle
+
+The aim of this tutorial is to introduce the user to the spectral/$hp$ element
+framework \nektar and its use in hydrodynamic stability analysis.
+Information on how to install the libraries, solvers, and utilities on your own
+computer is available on the webpage\footnote{www.nektar.info}. However, for
+this tutorial, the software is preinstalled on the laboratory computers. 
+% A
+% series of regression tests are included to verify that the software is producing
+% the expected results. Please ensure these all pass on your computer before
+% continuing, by running the following command:
+% 
+% \tutorialcommand{IncNavierStokesSolverTest}
+
+In the first section we will cover the stability analysis of a two-dimensional
+channel flow, through both a splitting scheme and the direct inversion algorithm. We will
+then study the transient growth of the flow past a backward-facing step and the
+direct/adjoint stability analysis of a flow past a cylinder.
+
+\tutorialtask{
+A number of data files are provided for use in this tutorial. These are located
+in the read-only folder \tutorialpath. You should copy this directory, and all
+the files within, to your home directory before continuing, using the following
+command:
+\tutorialcommand{cp -a \tutorialpath \quad \$HOME/}
+}
+
+\section{Two-dimensional Channel flow}
+Linear stability analysis is a technique that allows us to determine the
+asymptotic stability of a flow. By decomposing the velocity and pressure in the
+Navier-Stokes equations as a summation of a base flow $(\mathbf{U},\mathbf{P})$
+and perturbation $(\mathbf{u'},\mathbf{v'})$, such that
+$\mathbf{u}=\mathbf{U}+\epsilon \mathbf{u'}$, $p=P+\epsilon p'$, with $\epsilon
+\ll 1$, we derive the linearised Navier-Stokes equations,
+
+\begin{align} 
+\label{perturbationeqns}
+\frac{\partial \mathbf{u'}}{\partial t} + \mathbf{U} \cdot \nabla{\mathbf{u'}} 
+        + \mathbf{u'} \cdot \nabla{\mathbf{U}}  
+        &=-\nabla p' + \frac{1}{Re}\nabla^{2}\mathbf{u'}+\mathbf{f'}, \\
+\nabla \cdot \mathbf{u'}&=0.
+\end{align}
+
+We will consider a parallel base flow through a 2-D channel (known as Poiseuille
+flow) at Reynolds number $Re=7500$ . The velocity has the following analytic form:
+
+\begin{equation}
+\mathbf{U}=(y+1)(1-y)\mathbf{e_x}
+\end{equation}
+
+The domain is $\Omega=[-\pi,\pi] \times [-1,1]$ and it is composed by 48
+quadrilateral elements as shown in figure \ref{Channel_mesh}. The problem has been
+made non-dimensional using the centreline velocity and the channel half-height.
+
+\begin{figure}
+\centering
+\includegraphics{img/mesh_chan.png}
+\caption{48 quadrilaterals mesh}
+\label{Channel_mesh}
+\end{figure}
+
+This mesh was created using the software \gmsh and the first step is to
+convert it into a suitable input format so that it can be processed by the
+\nektar libraries.
+
+In the tutorial folder \texttt{Channel/Geometry} you will find the
+following files:
+\begin{itemize}
+\item \texttt{Channel.geo}- $Gmsh$ file containing the geometry of the problem
+\item \texttt{Channel.msh}- $Gmsh$ generated mesh data listing mesh vertices and
+elements.
+\item \texttt{Channel.xml} - \nektar session file generated from
+\texttt{Channel.msh} using a \nektar utility.
+\end{itemize}
+
+\tutorialtask{
+Convert the $Gmsh$ geometry provided into the XML \nektar format
+\begin{itemize}
+\item \texttt{Channel.msh} can be generated using $Gmsh$ by running the
+following command:
+\tutorialcommand{gmsh -2 Channel.geo}
+\item \texttt{Channel.xml} can be generated using the \texttt{MeshConvert}
+pre-processing tool:
+\tutorialcommand{MeshConvert Channel.msh Channel.xml}
+\end{itemize}
+Examine the \texttt{Channel.xml} file you have just created. Only the mesh and
+default expansions are defined at present.
+}
+
+
+\subsection{Computation of the base flow}
+
+We must first create an appropriate base flow. Since, in hydrodynamic stability
+theory, it is assumed that the base flow is a incompressible, it can be
+computed by using the incompressible Navier-Stokes solver
+(\texttt{IncNavierStokesSolver}).
+
+The specified boundary conditions will be
+no-slip on the walls and periodic for the inflow/outflow. In
+this case, since  it  is not a constant pressure gradient that drives the flow,
+it is necessary to use a constant body-force in the streamwise direction. It can
+be shown that this should be equal to $2\nu$.
+
+In the folder \texttt{Channel/Base} you will find the file
+\texttt{Channel-Base.xml} which contains the geometry described above along with
+the necessary parameters to solve the problem. The \texttt{GEOMETRY} section
+defines the mesh of the problem and it is generated automatically as you have
+seen in the previous task. The expansion type and order is specified in the
+\texttt{EXPANSIONS} section. An expansion basis is applied to a geometry
+composite\footnote{by composite we mean a collection of mesh entities, but we
+specifically require a collection of mesh elements here} specified in the
+\texttt{GEOMETRY} section. A default entry is always included by the
+\texttt{MeshConvert} utility. In this case the composite \texttt{C[0]} refers to
+the set of all elements. The \texttt{FIELDS} attribute specifies the fields for
+which this expansion should be used. The \texttt{TYPE} attribute specifies the
+kind of the polynomial basis functions to use in the expansion. For example,
+
+\begin{verbatim}
+<EXPANSIONS>
+    <E COMPOSITE="C[0]" NUMMODES="8"  FIELDS="u,v,p" TYPE="MODIFIED"/>
+</EXPANSIONS>.
+\end{verbatim}
+
+If we examine \texttt{Channel-Base.xml}, we can see how to define the
+conditions of the particular problem to solve. These are all enclosed
+in a \texttt{CONDITIONS} section. This section contains a number of entries:
+
+\begin{enumerate}
+\item \textbf{Solver information} (\texttt{SOLVERINFO}) such as the equation, 
+the projection type (\texttt{Continuous} or \texttt{Discontinuous}
+Galerkin), the evolution operator (\texttt{Nonlinear} for non-linear
+Navier-Stokes, \texttt{Direct}\footnote{in this case the term $Direct$ refers to the direct stability analysis (opposed to the adjoint analysis) and it has no relation with the Direct Inversion Algorithm that will be explained in the next section}, \texttt{Adjoint} or \texttt{TransientGrowth}
+for linearised forms) and the analysis driver to use (\texttt{Standard},
+\texttt{Arpack} or \texttt{ModifiedArnoldi}), along with other properties. The
+solver properties are specified as quoted attributes and have the form
+\begin{verbatim}
+<I PROPERTY="[STRING]" VALUE="[STRING]" />
+\end{verbatim}
+
+\tutorialtask{ 
+In the \texttt{SOLVERINFO} section of \texttt{Channel-Base.xml}:
+\begin{itemize}
+    \item set \texttt{EQTYPE} to \texttt{UnsteadyNavierStokes} to select the
+    unsteady incompressible Navier-Stokes equations,
+    \item set the \texttt{EvolutionOperator} to select the non-linear
+    Navier-Stokes,
+    \item set the \texttt{Projection} property to continuous Galerkin, 
+    \item set the \texttt{Driver} to perform standard time-integration.
+\end{itemize}
+}
+
+\item The \textbf{parameters} are specified as name-value pairs:
+\begin{verbatim}
+<P> [KEY] = [VALUE] </P>
+\end{verbatim}
+Parameters may be used within other expressions, such as function definitions,
+boundary conditions or the definition of other subsequently defined parameters.
+
+\tutorialtask{
+Declare parameters \texttt{Re} and \texttt{Kinvis} which sets the Reynolds
+number to 7500 and the kinematic viscosity, $\nu$, to $1/Re$.}
+
+\item The declaration of the \textbf{variable(s)}.  
+\begin{verbatim}
+<VARIABLES>
+    <V ID="0"> u </V>
+    <V ID="1"> v </V>
+    <V ID="2"> p </V> 
+</VARIABLES>
+\end{verbatim}
+
+\item The specification of \textbf{boundary regions} in terms of composites
+defined in the \texttt{GEOMETRY} section and the conditions applied on those
+boundaries. Boundary regions have the form
+\begin{verbatim}
+<B ID="[INDEX]"> [COMPOSITE-ID] </B>
+\end{verbatim}
+
+The \textbf{boundary conditions} enforced on a region take the following format
+and must define the condition for each variable specified in the
+\texttt{VARIABLES} section to ensure the problem is well-posed.
+\begin{verbatim}
+<REGION REF="[B-REGION-INDEX]">
+    <[TYPE] VAR="[VARIABLE_1]" VALUE="[EXPRESSION_1]"/>
+    <[TYPE] VAR="[VARIABLE_2]" VALUE="[EXPRESSION_2]"/>
+    ...
+</REGION>
+\end{verbatim}
+
+The \texttt{REF} attribute for a boundary condition region should correspond to
+the \texttt{ID} of the desired \texttt{BOUNDARYREGION}.
+
+\item The definition of the (time- and) space-dependent functions, in terms of
+$x$, $y$, $z$ and $t$, such as initial conditions, forcing functions, and exact
+solutions. The \texttt{VARIABLES} represent the components of the specific function in
+a specified direction and they must be the same for every function.
+\begin{verbatim}
+<FUNCTION NAME="[NAME]">
+    <E VAR="[VARIABLE_1]" VALUE="[EXPRESSION]"/>
+    <E VAR="[VARIABLE_2]" VALUE="[EXPRESSION]"/>
+    ...
+</FUNCTION>
+\end{verbatim}
+Alternatively, one can specify the function using an external \nektar field
+file.
+\begin{verbatim}
+<FUNCTION NAME="[NAME]">
+    <F FILE="[FILENAME]"/>
+</FUNCTION>
+\end{verbatim}
+
+\tutorialtask{
+Define a body forcing function in the streamwise direction (called
+\texttt{BodyForce}): $f_x=2\nu $.
+}
+\tutorialtask{
+Define a function called \texttt{ExactSolution}.
+For the Poiseuille flow with a streamwise  forcing term the exact solution is:
+\begin{align}
+U&=(y+1)(1-y) \\
+V&=0 \\
+P&=0
+\end{align}
+}
+
+\end{enumerate}
+
+It is possible to specify an arbitrary initial condition. In this case, it was decided to start from the exact solution of the problem in order to have a steady state in just few iterations. If the initial condition is not specified, it will be set to zero by default.
+
+This completes the specification of the problem.
+
+\tutorialtask{
+Compute the base flow using the \texttt{Channel-Base.xml} session file: 
+\tutorialcommand{IncNavierStokesSolver Channel-Base.xml}
+}
+
+At the end of the simulation, the fields will be written to a binary file
+\texttt{Channel-Base.fld} and the $L_2$ error (using the given exact solution)
+and the $L_{\infty}$ error will be printed on the terminal for each of the
+variables. 
+
+To visualise the flow fields, we will convert the \texttt{.fld} file into VTK
+format and use \paraview.
+
+\tutorialtask{
+Convert the file:
+\tutorialcommand{FldToVtk Channel-Base.xml Channel-Base.fld}
+Now run \paraview:
+\tutorialcommand{paraview}
+Use File -\textgreater Open, to select the VTK file, click the 'Apply' button
+to render the geometry, and select each field in turn from the left-most
+drop-down menu on the toolbar to visualise the output. }
+
+
+\subsection{Stability analysis}
+After computing the base flow it is now possible to calculate the
+eigenvalues and the eigenmodes of the linearised Navier-Stokes equations. Two
+different algorithms can be used to solve the equations: the splitting scheme
+(\texttt{VelocityCorrectionScheme}) and the direct inversion algorithm
+(\texttt{CoupledLinearisedNS}).  We will consider both cases, highlighting the
+similarities and differences of these two methods. In this tutorial we will use
+the Implicitly Restarted Arnoldi Method (IRAM), which is implemented in the
+open-source $ARPACK$ library. Alternatively, one can use the modified
+Arnoldi algorithm.\footnote{Int. J. Numer. Meth.
+Fluids, 2008; \textbf{57}:1435-1458}
+
+First, we will compute the leading eigenvalues and
+eigenvectors using the splitting scheme method. In the
+\texttt{Channel/Stability} folder there is a file
+called \texttt{Channel\_VCS.xml}. This is similar to \texttt{Channel.xml}, but
+contains additional instructions to perform the direct stability analysis.
+
+\smallskip 
+
+\tutorialnote{The entire \texttt{GEOMETRY} section, and \texttt{EXPANSIONS}
+section must be identical to that used to compute the base flow.}
+
+
+\tutorialtask{
+Configure the following additional options and run the linear stability
+analysis for the channel:
+\begin{enumerate}
+\item \texttt{EvolutionOperator} must now be set to \texttt{Direct} to activate
+the forward linearised Navier-Stokes system.
+\item \texttt{Driver} must be set to \texttt{Arpack} to use $Arpack$ eigenvalue
+analysis.
+\item A restart file is provided to accelerate communications. Set the
+\texttt{InitialConditions} function to be read from \texttt{Channel.rst}.
+The solution will then converge after 16 iterations.
+\footnote{Since the simulations often take hundreds of iterations to
+converge, we will not initialise the IRAM method with a random vector during
+this tutorial. Normally, a random vector would be used by setting
+\texttt{InitialVector} to \texttt{Random}
+} 
+
+\tutorialnote{The restart file is a field file (same format as \texttt{.fld}
+files) that contains the eigenmode of the system.}
+
+\item  The base flow file (\texttt{Channel-Base.fld}),
+computed in the previous section,  was copied into the \texttt{Channel/Stability} folder and
+renamed  \texttt{Channel\_VCS.bse}.
+
+Now specify a function called \texttt{BaseFlow} which reads this file.
+
+\item We can instruct ARPACK to converge onto specific eigenvalues through the
+solver property \texttt{ArpackProblemType}: the ones with the largest magnitude
+(\texttt{LargestMag}), largest real part (\texttt{LargestReal)} or largest
+imaginary part (\texttt{LargestImag}). In our case we are interested in
+computing the eigenvalues with the largest magnitude that determinate the
+stability of the flow.
+
+\item Set the parameters for the IRAM algorithm:
+
+\begin{itemize}
+\item \texttt{kdim=16}: dimension of Krylov-space,
+\item \texttt{nvec=2}: number of requested eigenvalues,
+\item \texttt{nits=500}: number of maximum allowed iterations,
+\item \texttt{evtol=1e-6}: accepted tolerance on the eigenvalues and it
+determines the stopping criterion of the method.
+\end{itemize}
+
+\end{enumerate}
+
+Run the solver to perform the analysis
+\tutorialcommand{IncNavierStokesSolver Channel\_VCS.xml}
+}
+
+The eigenvalues are computed in the exponential form $M e^{i\theta}$ where
+$M=|\lambda|$ is the magnitude, while $\theta= arctan (\lambda_i/\lambda_r)$ the
+phase.
+
+\begin{equation}
+\lambda_{1,2}= 1.00224 e^{\pm 0.24984 i}
+\end{equation}
+
+It is interesting to consider more general quantities that do not depend on the
+time length chosen for each iteration $T$. For this purpose we consider
+the growth rate $\sigma=ln(M)/T$ and the frequency $\omega= \theta/T$.
+
+Figures \ref{eig_u} and \ref{eig_v} show the profile of the computed
+eigenmode. The eigenmodes associated with the computed eigenvalues
+are stored in the files \texttt{Channel\_VCS\_eig\_0} and
+\texttt{Channel\_VCS\_eig\_1}. It is possible to convert this file into VTK
+format in the same way as previously done for the base flow earlier.
+
+\begin{figure}
+\centering
+\includegraphics[scale=0.3]{img/eig_u.png}
+\caption{$u'$-component of the eigenmode}
+\label{eig_u}
+\end{figure}
+
+\begin{figure}
+\centering
+\includegraphics[scale=0.3]{img/eig_v.png}
+\caption{$v'$-component of the eigenmode}
+\label{eig_v}
+\end{figure}
+
+\tutorialtask{
+Verify that for the channel flow case :
+\begin{align*}
+\sigma&=2.23711 \times 10^{-3} \\
+\omega&=\pm 2.498413 \times 10^{-1}
+\end{align*}
+and that the eigenmodes match those given in figures \ref{eig_u} and
+\ref{eig_v}.
+}
+
+This values are in accordance with the literature, in fact in Canuto et al.,
+1988 suggests $2.23497\times 10^{-3}$ and $2.4989154\times 10^{-1}$ for growth
+and frequency, respectively. 
+
+
+\subsubsection{Direct Inversion Algorithm}
+
+It is possible to perform the same stability analysis using a different
+method based on the direct inversion algorithm. This method requires the solution of the
+full velocity-pressure system, meaning that the velocity matrix system and the
+pressure system are coupled, in contrast to the splitting/projection schemes.
+It is easy to extend this method to solve the unsteady Navier-Stokes equations
+introducing into the Stokes problem an unsteady term $\mathbf{u_f}$ that
+modifies the weak Laplacian operator into a weak Helmoholtz operator.
+Furthermore, the non-linear terms are explicitly advanced in time and treated as
+a forcing function to the Stokes solver.
+
+Inside the folder \texttt{Channel/Stability} there is a file called
+\texttt{Channel\_Coupled.xml} that contains all the necessary parameters that 
+should be defined. As with the previous example, it is
+possible to specify the base flow putting the \texttt{Channel\_Coupled.bse} in
+the working directory. However, it is also possible to specify the base flow
+directly from session file if it has an analytical expression like in our 
+simple case. This second method will the be presented in this section. Even in
+this case, the geometry, the type and number of modes are the the same of the
+previous simulations.
+
+\tutorialtask{
+Edit the file \texttt{Channel\_Coupled.xml}:
+\begin{itemize}
+\item Set the \texttt{SolverType} property to \texttt{CoupledLinearisedNS} in
+order to solve the linearised Navier-Stokes equations using $Nektar++$'s coupled
+solver.
+\item the \texttt{EQTYPE} must be set to \texttt{SteadyLinearisedNS} and the
+\texttt{Driver} to \texttt{Arpack}.
+\item Set the \texttt{InitialVector} property to \texttt{Random} to initialise
+the IRAM with a random initial vector. In this case the function
+\texttt{InitialConditions} will be ignored.
+\item To compute the eigenvalues with the largest magnitude, specify
+\texttt{LargestMag} in the property \texttt{ArpackProblemType}.
+\end{itemize}
+}
+
+It is important to note that the use of the coupled solver requires that
+\textbf{only the velocity component variables} are specified, while the
+pressure can be directly computed through their values.
+
+
+\tutorialtask{
+Continue modifying \texttt{Channel\_Coupled.xml}:
+\begin{itemize} 
+\item In this case it is a body force that provides the driving of the
+flow. This is done by the setting the  previously introduced function
+\texttt{BodyForce}  to $cos(y)$ for the $u$ component and $sin(y)$ for the $v$
+component.  
+\item Finally, it is necessary to set up the base flow. For the
+\texttt{SteadyLinearisedNS} coupled solver, this is defined through a function
+called \texttt{AdvectionVelocity}. The $u$ component must be set up to $1-y^2$,
+while the $v$-component to zero.
+\end{itemize}
+
+Now run the solver to compute the eigenvalues.
+}
+
+Using the Stokes algorithm, we are computing the leading eigenvalue of the
+inverse of the evolution operator  $\mathcal{L}^{-1}$ . Therefore the
+eigenvalues of  $\mathcal{L}$ are the inverse of the computed
+values \footnote{$\mathcal{L}$ is the evolution operator
+$d \mathbf{u}/dt= \mathcal{L} \mathbf{u}$}. However, it is interesting to note that these values are different from
+those calculated with the Splitting Scheme Method, producing an apparent
+inconsistency. However, this can be explained considering that the largest
+eigenvalues associated to the operator $\mathcal{L}$ correspond the ones that
+are clustered near the origin of the complex plane if we consider the spectrum
+of $\mathcal{L}^{-1}$. Therefore, eigenvalues with a smaller magnitude may be
+present but are not associated with the largest magnitude eigenvalue of
+operator $\mathcal{L}$. In order to verify this issue, let us search for the
+eigenvalue with a different criterion, for example, the largest imaginary part.
+
+\tutorialtask{
+Set up the Solver Info tag \texttt{ArpackProblemType} to
+\texttt{LargestImag} and run the simulation again. 
+}
+
+In this case, it is easy to to see that the eigenvalues of the evolution
+operator $\mathcal{L}$ are the same ones computed in the previous section with
+the time-stepping approach. It is interesting to note that this method converges
+much quicker that the time-stepping algorithm. However, building the coupled
+matrix that allows us to solve the problem can take a non-negligible
+computational time for more complex cases.
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\section{Backward-facing step}
+In this section we will perform a transient growth analysis of the flow over a
+backward-facing step. This is an important case which allows us to understand
+the effects of separation due to abrupt changes of geometry in an open flow. The
+transient growth analysis consists of computing the maximum energy growth,
+$G(\tau)$, attainable over all possible initial conditions $\mathbf{u}' (0)$ for
+a specified time horizon $\tau$. It can be demonstrated that it is equivalent to
+calculating the largest eigenvalue of $\mathcal{A}^*(\tau)\mathcal{A}(\tau)$,
+with $\mathcal{A}$ and $\mathcal{A}^*$ being the direct and the adjoint
+operators, respectively. Also note that the eigenvalue must necessarily be real
+since $\mathcal{A}^*(\tau)\mathcal{A}(\tau)$ is self-adjoint in this case.
+
+
+The files for this section can be found in the \texttt{backward-facing\_step}
+directory.
+
+\begin{itemize}
+\item Folder \texttt{Geometry}
+\begin{itemize}
+\item  \texttt{bfs.geo} - \gmsh file that contains the geometry of the problem
+\item \texttt{bfs.msh} - \gmsh generated mesh data listing mesh vertices and 
+elements.
+\end{itemize}
+
+\item Folder \texttt{Base}
+\begin{itemize}
+\item \texttt{bfs-Base.xml} - \nektar session file, generated with the
+\texttt{MeshConvert} utility, for computing the base flow.
+\item \texttt{bfs-Base.fld} - \nektar field file that contains the base flow,
+generated using \\\texttt{bfs-Base.xml}.
+\end{itemize}
+
+\item Folder \texttt{Stability}
+\begin{itemize}
+\item \texttt{bfs\_tg.xml} - \nektar session file, generated with
+\texttt{MeshConvert}, for performing the transient growth analysis.
+\item \texttt{bfs\_tg.bse} - \nektar field file that contains the base flow. It
+is the same as the \texttt{.fld} file present in the folder \texttt{Base}.
+\end{itemize}
+
+\end{itemize}
+
+
+Figure \ref{bfs_mesh_full} shows the mesh we will use for the computation, along
+with a detailed view of the step edge in figure \ref{bfs_mesh_step}. The
+geometry is non-dimensionalised by the step height. The domain has an inflow
+length of 10 upstream of the step edge and a downstream channel of length 50.
+The mesh consist of $N=430$ elements. Note that in this case the mesh is
+composed of both triangular and quadrilateral elements. A refined triangular
+unstructured mesh is used near the step to capture the separation effects,
+whereas the inflow/outflow channels have a structure similar to the previous
+example. Therefore in the \texttt{EXPANSION} section of the
+\texttt{bfs-Base.xml} file, two composites (\texttt{C[0]} and \texttt{C[1]}) are
+present. For this example, we will use the \texttt{MODIFIED} basis with
+7th-order polynomials.
+
+We will perform simulations at $Re=500$, since it is well-known that
+for this value the flow presents a strong convective instability.
+
+The file \texttt{bfs\_tg.bse} is the output of the base-flow computation that should
+be run for a non-dimensional time of $t \ge 300$ to ensure that the solution is
+steady.
+
+\begin{figure}
+\centering
+\includegraphics[scale=1.2]{img/bfs_mesh.png}
+\caption{Mesh used for the backward-facing step}
+\label{bfs_mesh_full}
+\end{figure}
+
+\begin{figure}
+\centering
+\includegraphics[scale=0.6]{img/bfs_detail.png}
+\caption{Detail of the mesh used for the backward-facing step nearby the step}
+\label{bfs_mesh_step}
+\end{figure}
+
+\tutorialtask{
+Convert the base flow field file \texttt{bfs\_tg.bse} into VTK format to look at the
+profile of the base flow. Note the separation at the step-edge and the
+reattachment downstream.}
+
+We will now perform transient growth analysis with a Krylov subspace of
+\texttt{kdim=4}. The parameters and properties needed for this are present in
+the file \texttt{bfs\_tg.xml} in \texttt{backward-facing\_step/Stability}. In
+this case the \texttt{Arpack} library was used to compute the largest eigenvalue
+of the system and the corresponding eigenmode. We will compute the maximum
+growth for a time horizon of $\tau=1$, usually denoted $G(1)$.
+
+\tutorialtask{
+Configure the \texttt{bfs\_tg.xml} session for performing transient growth
+analysis:
+\begin{itemize}
+\item Set the \texttt{EvolutionOperator} to \texttt{TransientGrowth}.
+\item Define a parameter \texttt{FinalTime} that is equal to 1 (this is the
+time horizon).
+\item Set the number of steps (\texttt{NumSteps}) to be the ratio between the
+final time and the time step.
+\item Since the simulations take several iterations to converge, use the restart
+file \texttt{bfs\_tg.rst} for the initial condition. This file contains an
+eigenmode of the system.
+\end{itemize}
+
+Now run the simulation
+\tutorialcommand{IncNavierStokesSolver bfs\_tg.xml}
+}
+
+Initially, the solution will be evolved forward in time using the operator
+$\mathcal{A}$ , then backward in time through the adjoint operator
+$\mathcal{A}^*$. It will converge quickly after 4 iterations and the leading
+eigenvalue should be $\lambda= 3.236204$. This corresponds to the largest
+possible transient growth at the time horizon $\tau=1$.
+The leading eigenmode is shown in figures \ref{bfs_u} and \ref{bfs_v}. This is
+the optimal initial condition which will lead to the greatest growth when
+evolved under the linearised Navier-Stokes equations.
+
+\begin{figure}
+\centering
+\includegraphics[scale=0.3]{img/bfs_eig_u.png}
+\caption{$u'$-component of the eigenmode}
+\label{bfs_u}
+\end{figure}
+
+\begin{figure}
+\centering
+\includegraphics[scale=0.3]{img/bfs_eig_v.png}
+\caption{$v'$-component of the eigenmode}
+\label{bfs_v}
+\end{figure}
+
+We can visualise graphically the optimal growth, recalling that the energy of
+the perturbation field any given time $t$ is defined by means of the inner
+product:
+
+\begin{align}
+E(\tau)&=\frac{1}{2}(\mathbf{u}'(t), \mathbf{u}'(t)) \\
+       &=\frac{1}{2} \int_\Omega \mathbf{u}' \cdot \mathbf{u}' dv
+\end{align}
+
+The solver can output the evolution of the energy of the perturbation in time by
+setting the parameter \texttt{IO\_EnergySteps}. This will write a \texttt{.mld}
+file containing the energy every specified number of steps. Repeating these
+simulations for different $\tau$ with the optimal initial perturbation as the
+initial condition, it is possible to create curves like those shown in figure
+\ref{opt_curves}. Each curve necessarily meets the optimal growth envelope
+(denoted by the circles) at its corresponding value of $\tau$, and never
+exceeds it.
+
+\begin{figure}
+\centering
+\includegraphics[scale=0.8]{img/envelope.png}
+\caption{Envelope of two-dimensional optima at $Re=500$ together with curves of
+linear energy evolution starting from the three optimal initial conditions for
+specific values of $\tau$ 20, 60 and 100. Figure reproduced from J. Fluid. Mech.
+(2008), vol 603, $pp$. 271-304.}
+\label{opt_curves}
+\end{figure}
+
+\tutorialtask{
+(Optional) Try generating a curve for the initial condition computed in the
+previous task.
+
+\smallskip
+
+\textbf{Hint:} You will need to switch back to using the \texttt{Standard}
+driver and use the \texttt{Direct} evolution operator for this task.
+}
+
+
+
+\section{Flow past a cylinder}
+As a final example we will compute the direct and adjoint modes of a
+two-dimensional flow past a cylinder. We will investigate a case in the
+subcritical regime ($Re=42$), below the on-set of the Bernard-von K\"arm\"an
+vortex shedding that is observed when the Reynolds number is above the critical
+value $Re_c \simeq 47$; this analysis is important because it allows us to study
+the sensitivity of the flow, much like that reported by Giannetti and Luchini (
+J. Fluid Mech., 2007; \textbf{592}:177-194).  Due to the complex nature of the
+flow and the demanding computational time that is required, only some basic
+information will be presented in this section, mainly to show the potential
+of the code for stability analysis.
+
+In the folder \texttt{Cylinder/Geometry} there are the $Gmsh$ files
+(\texttt{Cylinder.geo} and \texttt{Cylinder.msh}) used to create a suitable mesh
+for the direct and adjoint stability analysis. The mesh is shown in figure
+\ref{cylinder_direct} and a detailed view around the cylinder is shown in figure
+\ref{cylinder_detail}. This mesh is made up of 780 quadrilateral elements. 
+
+\tutorialnote{It is
+important to note that stability and transient growth calculations, in
+particular, have a strong dependence on the domain size as reported by Cantwell
+and Barkley (Physical Review E, 2010; \textbf{82}); moreover, poor mesh design
+can lead to incorrect results. Specifically, the mesh must be sufficiently
+refined around the cylinder in order to capture the separation of the flow and
+abrupt variations in the size of the elements should be avoided.} 
+
+\texttt{Cylinder-Base.xml} can be found inside the \texttt{Cylinder/Base}
+folder. This is the \nektar file generated using \texttt{MeshConvert} and
+augmented with all the configuration settings that are required. In this case,
+CFL conditions can be particularly restrictive and the time step must be set
+around $8 \times 10^{-4}$. We will be using Reynolds number $Re=42$ for this
+study.
+
+\begin{figure}[ht!]
+\centering
+\includegraphics[scale=1]{img/cylinder.png}
+\caption{Mesh used for the direct stability analysis}
+\label{cylinder_direct}
+\end{figure}
+
+\begin{figure}[ht!]
+\centering
+\includegraphics[scale=0.5]{img/cylinder_det.png}
+\caption{Detail of the mesh around the cylinder}
+\label{cylinder_detail}
+\end{figure}
+
+The supplied file \texttt{Cylinder-Base.bse} is the converged base flow required
+for the analysis and is the result of running \texttt{Cylinder-Base.xml}. To
+have a steady solution it was necessary to evolve the fields for a
+non-dimensional time $\tau\ge 300$ and it is very important to be sure that the
+solution is steady. This can be verified by putting several
+history points on the centre line of the flow and monitoring their variation.
+
+\tutorialtask{ Convert the base flow into VTK format and visualise the profile
+of the flow past a cylinder in \paraview.}
+ 
+In the folder \texttt{Cylinder/Stability/Direct} there are the files that are
+required for the direct stability analysis. Since, the computation would
+normally take several hours to converge, we will use a restart file and a
+Krylov-space of just $\kappa=4$. Therefore, it will be possible to obtain the
+eigenvalue and the corresponding eigenmode after 4 iterations.
+ 
+\tutorialtask{ Define a Kyrlov space of 4 and compute the eigenvalues and the
+eigenvectors of the problem using the restart file
+\texttt{Cylinder\_Direct.rst}. Plot the leading eigenvector in \paraview. This
+should look like the solution shown in figures \ref{cyl_eig_u} and
+\ref{cyl_eig_v}. }
+ 
+The leading eigenvalues show a growth rate of $\sigma=-2.101955 \times 10^{-2}$
+and a frequency  $\omega= \pm 7.265859  \times 10^{-1}$.
+ 
+\begin{figure}[ht!] \centering \includegraphics[scale=0.3]{img/cyl_eig_u.png}
+\caption{$u'$-component of the eigenmode}
+\label{cyl_eig_u}
+\end{figure}
+
+\begin{figure}[ht!]
+\centering
+\includegraphics[scale=0.3]{img/cyl_eig_v.png}
+\caption{$v'$-component of the eigenmode}
+\label{cyl_eig_v}
+\end{figure}
+
+After the direct stability analysis, it is now interesting to compute the
+eigenvalues and eigenvectors of the adjoint operator $\mathcal{A}^*$ that allows
+us to evaluate the effects of generic initial conditions and forcing terms on
+the asymptotic behaviour of the solution of the linearised equations. In the
+folder \texttt{Cylinder/Stability/Adjoint} there is the file
+\texttt{Cylinder\_Adjoint.xml} that is used for the adjoint analysis.
+
+\tutorialtask{
+Set the \texttt{EvolutionOperator} to \texttt{Adjoint}, the
+Krylov space to 4 and compute the leading eigenvalue and eigenmode of the
+adjoint operator, using the restart file \texttt{Cylinder\_Adjoint.rst}
+
+\smallskip
+
+Plot the leading eigenmode in \paraview.
+}
+
+The solution should converge after 4 iterations, giving the eigenvalues of the
+system as $\lambda_{1,2}= 0.980495\times e^{\pm i 0.727502}$ with a growth rate
+equal to $\sigma=-1.969727 \times 10^{-2}$ and a frequency $\omega= \pm 7.275024 
+\times 10^{-1}$. However, the most interesting thing to observe is the shape of
+the eigenmode. In particular, in spatially developing flows
+the eigenmodes of the direct stability operator tend to be located downstream
+while the eigenmodes of the adjoint operator tend to be located upstream, as
+can be seen in figures \ref{cyl_adj_u} and \ref{cyl_adj_v}. From the profiles of the eigemodes, it can be deducted that the
+regions with the maximum receptivity for the momentum forcing and mass injection are near the wake of the cylinder, close to the upper and lower
+sides of the body surface, in accordance with results reported in the literature.
+
+\begin{figure}[ht!]
+\centering
+\includegraphics[scale=0.9]{img/cyl_adj_u.png}
+\caption{Close-up of the $u^*$-component of the adjoint eigenmode.}
+\label{cyl_adj_u}
+\end{figure}
+
+\begin{figure}[ht!]
+\centering
+\includegraphics[scale=1]{img/cyl_adj_v.png}
+\caption{The $v^*$-component of the adjoint eigenmode extends far upstream of the cylinder}
+\label{cyl_adj_v}
+\end{figure}
+
+\begin{center}
+\textbf{\Large This completes the tutorial.}
+\end{center}
+
+\bigskip
+
+\section{Installing \nektar on your computer.}
+If you are interested in pursuing this sort of work further, you can install
+\nektar on your own laptop by downloading and compiling the source code from the
+website: \texttt{www.nektar.info}. Detailed installation instructions are
+provided on the website and you are welcome to ask for help if you get stuck!
+
+\end{document}

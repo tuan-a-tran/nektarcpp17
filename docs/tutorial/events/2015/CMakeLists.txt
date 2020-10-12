@@ -1,0 +1,2 @@
+ADD_SUBDIRECTORY(Crete-SummerSchool)
+ADD_SUBDIRECTORY(Imperial-NektarWorkshop)

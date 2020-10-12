@@ -1,0 +1,662 @@
+\input{tutorial-preamble.tex}
+
+\newcommand{\Lcoord}{\eta}	        % local coordinate
+\newcommand{\LCcoord}{\xi}              % local cartesian coordinates
+\newcommand{\error}{\varepsilon}	% error u - u^\delta
+\newcommand{\qord}{q}		        % No. of quadrature points in total.
+\newcommand{\pspace}{{ P}}          % space of all polynomials
+\newcommand{\Qsp}{{Q}}	        % Structured region
+\newcommand{\cmap} {{\chi}}           % local to global coordinate mapping
+\newcommand{\pord}{P}		        % polynomial order
+\newcommand{\base} {\phi} 		% basis notation
+\newcommand{\dom}{\Omega} 		% solution domain
+
+\title{Numerical Differentiation}
+
+\begin{document}
+
+%\frontmatter
+
+% Render pretty title page if not building HTML
+\ifdefined\HCode
+\begin{center}
+    \includegraphics[width=0.1\textwidth]{img/icon-blue.png}
+\end{center}
+\maketitle
+\begin{center}
+       \huge{Nektar++ Tutorial}
+\end{center}
+\else
+\titlepage
+\fi
+
+\clearpage
+
+%\ifx\HCode\undefined
+%\tableofcontents*
+%\fi
+%
+%\clearpage
+
+\chapter{Introduction}
+
+Welcome to the tutorial on the fundamentals of the \nektar framework
+where we will look at how to perform Differentiation
+using the \nektar LibUtilities library.  If you have not already downloaded
+and installed \nektar, please do so by
+visiting \href{http://www.nektar.info}{http://www.nektar.info}, where you can
+also find the
+\href{http://www.nektar.info/downloads/8}{User-Guide} with the
+instructions on how to install the library.
+
+This tutorial requires:
+\begin{itemize}
+    \item \nektar compiled libraries and include files compiled from source so additional code can be compiled with the framework libraries
+\end{itemize}
+
+\section*{Goals}
+After completing this tutorial, you should be familiar with:
+\vspace{-0.5cm}
+\begin{itemize}
+\item The concept of differentiation using classical Gauss and
+    Gauss-Lobatto rules in a standard interval  $\xi \in [-1,1]$; 
+\item Using the \nektar programming concepts of a \texttt{NekMatrix}, an \texttt{Array},
+    a \texttt{PointsKey} and the \texttt{PointsManager} to generate Gaussian
+        quadrature zeros and differentiation matrices;
+\item Differentiating in the standard segment ($\xi \in [-1,1]$) and quadrilateral
+    region ($\xi \in [-1,1]\times [-1,1]$);
+\item The mathematical concept of mapping a general quadrilateral region to the standard region, evaluating the jacobian of this mapping and using this to evaluate a derivative in a general straight sided quadrilateral region. 
+\end{itemize}
+
+\begin{tutorialtask}
+Prepare for the tutorial. Make sure that you have:
+\begin{itemize}
+    \item Installed and tested \nektar v\nekver{} compiled from source. We
+      will refer to the directory where you installed \nektar
+      as \inlsh{\$NEKDIST} for the remainder of the tutorial.
+
+The tutorial folder also contains: 
+\begin{itemize}
+\item CMakeList.txt
+\item LocDifferentiation2D.cpp
+\item StdDifferentiation1D.cpp
+\item StdDifferentiation2D.cpp
+\end{itemize}
+
+\item  Make a directory of your chosing, for example \inlsh{tutorial}, and download the tutorial files from
+        \relurl{fundamentals-differentiation.tar.gz}{fundamentals/differentiation}
+        into this directory.
+
+\item Unpack the tutorial files by using
+      \tutorialcommand{tar -xzvf fundamentals-differentiation.tar.gz} to produce a
+      directory \inlsh{fundamentals-differentiation} with subdirectories
+      called \inlsh{tutorial} and \inlsh{complete}.
+
+  \item Change to the 
+      
+      \inlsh{fundamentals-differentiation/tutorial}
+        
+      directory and
+      configure the tutorial examples for compilation by typing the command
+\tutorialcommand{cmake -DCMAKE\_PREFIX\_PATH=\$NEKDIST/build . }  You should now see a file called \inlsh{Makefile} in this directory. 
+
+\item Change to the 
+    
+    \inlsh{\$NEKDIST/tutorial/fundamentals-differentiation/complete} 
+        
+    directory and
+    configure the completed version of the tutorial examples for compilation by again typing the command \tutorialcommand{cmake -DCMAKE\_PREFIX\_PATH=\$NEKDIST/build}  You should now see a file called \inlsh{Makefile} in this directory. 
+\end{itemize}
+\end{tutorialtask}
+
+
+\chapter{Differentiation}
+
+Assuming a polynomial approximation of the form:
+%
+\[
+u^\delta(x) = \sum_{p=0}^{\pord} \hat{u}_p \base_p(\cmap^{-1}) = \sum_{p=0}^{\pord} \hat{u}_p \base_p(\LCcoord),
+\]
+%
+where $\cmap(\LCcoord)$ is the mapping from the standard region
+$\LCcoord \in \dom^{s}$ to the region containing $x$ in the interval
+$[a,b]$, we can differentiate $u(x)$ using the chain rule to obtain
+%
+\[
+\frac{d u^\delta(\LCcoord)}{d x} = \frac{d u^\delta(\LCcoord)}{d
+\LCcoord} \frac{d\LCcoord}{d x} = \sum_{p=0}^{\pord} \hat{u}_p
+\frac{d \base_p(\LCcoord)}{d\LCcoord} \frac{d\LCcoord}{d x}.
+\]
+%
+The differentiation of $u^\delta(x)$ is therefore dependent on
+evaluating $d\base_p(\LCcoord)/d\LCcoord$ and $\frac{d\LCcoord}{d
+x}$. In this section we shall consider the case where
+$\base_p(\LCcoord)$ is the Lagrange polynomial $h_p(\LCcoord)$ and
+discuss how to evaluate $d\base_p(\LCcoord)/d\LCcoord$.  If
+$\cmap(\LCcoord)$ is an isoparametric mapping this technique can also
+be used to evaluate $\frac{d\cmap}{d \LCcoord} = \left[\frac{d\LCcoord}{d
+x}\right ]^{-1} $. Differentiation of this form is often referred to as
+differentiation in physical space or {\em collocation
+differentiation}\index{collocation differentiation}.
+
+If we assume that $u^\delta(\LCcoord)$ is a polynomial of order equal
+to or less than $P$ [that is, $u^\delta(\LCcoord) \in \pspace_P([-1,1])$],
+then it can be exactly expressed in terms of Lagrange polynomials
+$h_i(\LCcoord)$ through a set of $\qord$ nodal points $\LCcoord_i$
+($0\leq i \leq \qord-1$) as
+\[
+u(\LCcoord) = \sum_{i=0}^{\qord-1} u(\LCcoord_i) h_i(\LCcoord), \hspace{1cm} 
+h_i(\LCcoord) = \frac{\Pi_{j=0,j\neq i}^{\qord-1} 
+(\LCcoord-\LCcoord_j)}{\Pi_{j=0,j\neq i}^{\qord-1} (\LCcoord_i-\LCcoord_j)}
+\]
+where $\qord \geq P+1$. Therefore the derivative of $u(\LCcoord)$ can
+be represented as
+%
+\[
+\frac{du(\LCcoord) }{d\LCcoord} = \sum^{\qord-1}_{i=0} u(\LCcoord_i) 
+\frac{d}{d\LCcoord} h_i(\LCcoord).
+\]
+%
+Typically, we only require the derivative at the nodal points
+$\LCcoord_i$ which is given by
+\[
+\left . \frac{du(\LCcoord)}{d\LCcoord} \right |_{\LCcoord=\LCcoord_i} = 
+\sum^{\qord-1}_{j=0} d_{ij}\hspace{3pt} u(\LCcoord_j),
+\]
+\noindent where 
+\[
+	d_{ij} = \left . \frac{dh_j(\LCcoord)}{d\LCcoord}  \right |_{\LCcoord = \LCcoord_i}.
+\]
+
+
+An alternative representation of the Lagrange polynomial is
+\[
+h_i(\LCcoord) = \frac{g_{\qord}(\LCcoord)}{g'_{\qord}(\LCcoord_i)
+	(\LCcoord-\LCcoord_i)}, \hspace{1cm} g_{\qord}(\LCcoord) =
+	\prod_{j=0}^{\qord-1} (\LCcoord-\LCcoord_j).
+\]
+Taking the derivative of $h_i(\LCcoord)$ we obtain
+\[
+\frac{dh_i(\LCcoord)}{d\LCcoord} = \frac{g'_{\qord}(\LCcoord)
+ (\LCcoord-\LCcoord_i) - g_{\qord}(\LCcoord)}
+		{ g'_{\qord}(\LCcoord_i) (\LCcoord-\LCcoord_i)^2}.
+\]
+Finally, noting that because numerator and denominator of this expression are
+zero as $\LCcoord \rightarrow \LCcoord_i$, and because 
+$P_\qord(\LCcoord_i) = 0$ by definition,
+\[
+\lim_{\LCcoord \rightarrow \LCcoord_i} \frac{dh_i(\LCcoord)}{d\LCcoord} = 
+\lim_{\LCcoord \rightarrow \LCcoord_i}
+\frac{g''_{\qord}(\LCcoord)}{2 g'_{\qord}(\LCcoord)} = 
+	\frac{g''_{\qord}(\LCcoord_i)}{2 g'_{\qord}(\LCcoord_i)}
+\]
+so we can write $d_{ij}$ as
+%
+\begin{equation}
+d_{ij} = \left \{ \begin{array}{cc} \displaystyle 
+\frac{g'_{\qord}(\LCcoord_i)}{g'_{\qord}(\LCcoord_j)}
+	 \frac{1}{(\LCcoord_i-\LCcoord_j)}& i\neq j, \\
+	& \\ \displaystyle 
+\frac{g''_{\qord}(\LCcoord_i)}{2 g'_{\qord}(\LCcoord_i) } & i = j.
+	\end{array} \right .
+\label{eqn.dij}
+\end{equation}
+%
+Equation (\ref{eqn.dij}) is the general representation of the
+derivative of the Lagrange polynomials evaluated at the nodal points
+$\LCcoord_i$ ($0\leq i \leq \qord-1$). To proceed further we need to
+know specific information about the nodal points $\LCcoord_i$ which
+will allow us to deduce alternative forms of $g'_{\qord}(\LCcoord_i)$
+and $g''_{\qord}(\LCcoord_i)$.
+
+\section{Legendre Formulae}
+\label{sec.legdiff}
+
+The most common differentiation matrices $d_{ij}$ are those
+corresponding to the Gauss-Legendre quadrature points. In this section we illustrate the final
+form of the differential matrices that correspond to the use of
+Gauss-Legendre, Gauss-Radau-Legendre, and Gauss-Lobatto-Legendre quadrature points.
+Denoting by $\LCcoord^{\alpha,\beta}_{i,P}$ the $P$
+zeros of the Jacobi polynomial $P^{\alpha,\beta}_P(\LCcoord)$ such
+that
+\[
+P^{\alpha,\beta}_{P}(\LCcoord^{\alpha,\beta}_{i,P}) = 0 
+\hspace{8mm} i = 0,1,\dots,P\!-\!1,
+\]
+the derivative matrix $d_{ij}$ used to evaluate $
+\frac{du(\LCcoord)}{d\LCcoord}$ at $\LCcoord_i$, that is, 
+\[
+\left . \frac{du(\LCcoord)}{d\LCcoord} \right |_{\LCcoord=\LCcoord_i} = 
+\sum^{\qord-1}_{j=0} d_{ij}\hspace{3pt} u(\LCcoord_j),
+\]
+is  defined as:
+
+\vspace{.1in}
+
+\noindent (1) {\em Gauss-Legendre}\index{differentiation at Gauss-Legendre zeros}
+\[
+\LCcoord_i  =  \LCcoord^{0,0}_{i,\qord} 
+\]
+\[
+d_{ij} = \left \{ \begin{array}{ll} \displaystyle
+\frac{L'_{\qord}(\LCcoord_i)}{L'_{\qord}(\LCcoord_j)(\LCcoord_i-\LCcoord_j)} 
+& i\neq j, 0\leq i,j \leq \qord-1\\  & \\ \displaystyle
+	\frac{\LCcoord_i}{(1-\LCcoord_i^2)} & i = j
+	\end{array} \right .
+\]
+
+\noindent (2) {\em Gauss-Radau-Legendre}\index{differentiation at 
+Gauss-Radau-Legendre zeros}
+\[
+	\LCcoord_i = \left \{ \begin{array}{ll}
+	 -1  &  i = 0\\
+	\LCcoord^{0,1}_{i-1,\qord-1} & i = 1,\dots,\qord-1
+		\end{array}  \right .
+\]
+\[
+d_{ij} = \left \{ \begin{array}{ll}\displaystyle
+\frac{-(\qord-1)(\qord+1)}{4} & i = j = 0 \\ & \\\displaystyle
+\frac{L_{\qord-1}(\LCcoord_i)}{L_{\qord-1}(\LCcoord_j)} 
+\frac{(1-\LCcoord_j)}{(1-\LCcoord_i)} 
+\frac{1}{(\LCcoord_i-\LCcoord_j)} & i\neq j, 0\leq i,j \leq \qord-1\\ &
+ \\\displaystyle
+\frac{1}{2(1-\LCcoord_i)} & 1\leq i = j \leq \qord-1
+	\end{array} \right .
+\]
+\noindent (3) {\em Gauss-Lobatto-Legendre}\index{differentiation at
+Gauss-Lobatto-Legendre zeros}
+\[
+	\LCcoord_i = \left \{ 
+	\begin{array}{cl}
+	 -1  &  i = 0\\
+	\LCcoord^{1,1}_{i-1,\qord-2} & i = 1,\dots,\qord-2 \\
+	  1  &  i = \qord-1
+	\end{array}  \right . \\
+\]
+\[
+d_{ij} = \left \{ \begin{array}{ll} \displaystyle
+\frac{-\qord(\qord-1)}{4} & i = j = 0 \\ & \\ \displaystyle
+\frac{L_{\qord-1}(\LCcoord_i)}{L_{\qord-1}(\LCcoord_j)} 
+\frac{1}{(\LCcoord_i-\LCcoord_j)} & i\neq j, 0\leq i,j \leq \qord-1\\ &
+ \\ \displaystyle
+0	 & 1\leq i = j \leq \qord-2 \\& \\ \displaystyle
+\frac{\qord(\qord-1)}{4} & i = j  =  \qord-1
+	\end{array} \right .
+\]
+
+
+In a similar way to the quadrature formulae the construction of the
+differen-\linebreak \noindent tiation matrices require the quadrature zeros to be 
+determined numerically. Having
+determined the zeros, the components of the differentiation matrix can
+be evaluated directly from the above formulae by generating the
+Legendre polynomial from the recursion relationship.
+
+\chapter{Computational Exercises}
+
+\section{One dimensional differentiation in a standard segment}
+In this first exercise we will demonstrate how to differentiate the
+function $f(\xi) = \xi^{7}$ in the standard segment $\xi \in [-1,1]$
+using Gaussian quadrature. The Gaussian quadrature zeros and the
+differentiation matrix are coded in the \inlsh{LIbUtilities} library
+and for future reference this can be found under the
+directory \inlsh{\$NEKDIST/library/LibUtilities/Foundations/}. For the
+following exercises we will access the zeros and differentiation matrix
+from the \texttt{PointsManager}. The \texttt{PointsManager} is a type of
+map (or manager) which requires a key defining known Gaussian quadrature
+types called \texttt{PointsKey}.
+
+
+In the \inlsh{\$NEKDIST/tutorial/fundamentals-differentiation/tutorial} directory
+open the file named \inlsh{StdDifferentiation1D.cpp}. Look over the comments
+supplied in the file which outline how to define the number of
+quadrature points to apply, the type of Gaussian quadrature, a differentiation matrix
+and some arrays to hold the zeros and solution. Finally
+a \inlsh{PointsKey} is defined which is then used to obtain the zeros in an array
+called \inlsh{quadZeros} and the differentiation matrix in a pointer to a matrix called
+\inlsh{derivMatrix}.
+
+\begin{tutorialtask}
+
+Implement a short block of code where you see  the comments \inlsh{``Write your code here''} which evaluates the loop
+\[
+\left . \frac{du(\LCcoord)}{d\LCcoord} \right |_{\LCcoord=\LCcoord_i} = 
+\sum^{\qord-1}_{j=0} d_{ij}\hspace{3pt} u(\LCcoord_j),
+\]
+\end{tutorialtask}
+
+\begin{tipbox}
+To access individual elements in \texttt{MatrixSharedPtrType},
+the pointer must first be dereferenced then accessed using the
+parantheses operator. This should look like
+\texttt{(*derivMatrix)(i, j)}. On the other hand, to access
+elements in \texttt{Array<OneD, NekDouble>}, the bracket operator
+can be directly used such as \texttt{quadZerosDir1[i]}. If the
+array is two-dimensional (\texttt{Array<TwoD, NekDouble>}),
+elements would be accessed through \texttt{quadDerivsDir1[i][j]}.
+\end{tipbox}
+
+To compile your code type
+\tutorialcommand{make StdDifferentiation1D}
+in the tutorial directory. When your code compiles successfully\footnote{If
+you are unable to get your code to compile you can see a completed
+exercise in the
+\inlsh{\$NEKDIST/tutorial/fundamentals-differentiation/completed}
+directory. The tutorial code is contained within a \inlsh{\#if
+WITHSOLUTION} block} then type
+\tutorialcommand{./StdDifferentiation1D}
+
+You should now get some output similar to
+\begin{lstlisting}[style=BashInputStyle]
+======================================================
+|      DIFFERENTIATION IN A 1D STANDARD REGION       |
+======================================================
+Differentiate the function f(xi) = xi^7 in the
+standard segment xi=[-1,1] using quadrature points
+         Q = 7: Error = 1.49647
+\end{lstlisting}
+
+
+
+\begin{tutorialtask}
+Evaluate the previous derivatives for a quadrature order of $Q = Q_{\max}$
+where $Q_{\max}=8$ is the number of quadrature points required for an
+exact evaluation of the derivatives (calculate this value
+analytically). Verify that the error is zero (up to numerical
+precision).
+\end{tutorialtask}
+
+We can also use Gauss-Lobatto-Legendre type differentiation rather than
+Gauss-Legendre type in the previous exercises. To do this we replace
+\begin{lstlisting}[language=C++]
+LibUtilities::PointsType quadPointsType =
+                         LibUtilities::eGaussGaussLegendre;
+\end{lstlisting}
+with 
+\begin{lstlisting}[language=C++]
+LibUtilities::PointsType quadPointsType =
+                         LibUtilities::eGaussLobattoLegendre;
+\end{lstlisting}
+
+
+\section{Two-dimensional differentiation in a standard and local region}
+
+\subsection{Quadrilateral element in a standard region}
+
+A straightforward extension of the one-dimensional Gaussian rule is to the
+two-dimensional standard quadrilateral region and similarly to the
+three-dimensional hexahedral region. Differentiation in $\Qsp^2 =
+\{-1 \leq \LCcoord_1,\LCcoord_2 \leq 1\}$ in the $\LCcoord_1$ direction
+is defined as
+%
+\[
+\frac{du(\LCcoord_1,\LCcoord_2)}{d\LCcoord_1} =
+\sum^{\qord_1-1}_{i=0} \sum^{\qord_2-1}_{j=0}
+u({\LCcoord_1}_i ,{\LCcoord_2}_j ) 
+\frac{d}{d\LCcoord_1} ({h_1}_i(\LCcoord_1) {h_2}_j(\LCcoord_2)) 
+\]
+%
+\noindent where $h_1$ and $h_2$ are the polynomials associated
+respectively with coordinates $\LCcoord_1$ and $\LCcoord_2$.
+
+Because $h_2$ is not a function of $\LCcoord_1$, we can rewrite the formula as
+%
+\begin{equation}
+\frac{du(\LCcoord_1,\LCcoord_2)}{d\LCcoord_1} =
+\sum^{\qord_1-1}_{i=0} \sum^{\qord_2-1}_{j=0}
+u({\LCcoord_1}_i ,{\LCcoord_2}_j ) 
+{h_2}_j(\LCcoord_2) \frac{d}{d\LCcoord_1} {h_1}_i(\LCcoord_1).
+\label{eqn.2dintermediate}
+\end{equation}
+%
+
+Typically, we only require the derivative at the nodal points
+$({\LCcoord_1}_i,{\LCcoord_2}_j)$. At these points, $h_2$ has trivial values,
+i.e. unit value at ${\LCcoord_2}_j$ and null value at all other points. The summation
+over $j$ therefore drops and we are left with the same formula as in our
+one-dimensional problem
+%
+\begin{equation}
+\left . \frac{du(\LCcoord_1,\LCcoord_2)}{d\LCcoord_1}
+\right |_{\LCcoord=({\LCcoord_1}_i,{\LCcoord_2}_j)}=
+\sum^{\qord_1-1}_{k=0}
+{d_1}_{ik} \hspace{3pt} u({\LCcoord_1}_k ,{\LCcoord_2}_j )
+\label{eqn.2dfinal}
+\end{equation}
+%
+\noindent where ${d_1}_ik$ is the differentiation matrix in the
+$\LCcoord_1$ direction such that
+%
+\[
+{d_1}_{ik} = \left . \frac{{dh_1}_k(\LCcoord_1)}{d\LCcoord_1}  \right |_{\LCcoord_1 = {\LCcoord_1}_i}.
+\]
+%
+
+Likewise, the derivative with respect to $\LCcoord_2$ can be expressed by
+%
+\[
+\left . \frac{du(\LCcoord_1,\LCcoord_2)}{d\LCcoord_2}
+\right |_{\LCcoord=({\LCcoord_1}_i,{\LCcoord_2}_j)}=
+\sum^{\qord_2-1}_{k=0}
+{d_2}_{jk} \hspace{3pt} u({\LCcoord_1}_i ,{\LCcoord_2}_k ).
+\]
+%
+
+\begin{tutorialtask}
+Differentiate the function $f(\xi_1,\xi_2)
+= \xi_1^{7}\, \xi_2^{9}$ in the standard quadrilateral element
+$\Qsp \in [-1,1]\times[-1,1]$ using Gaussian quadrature points.
+
+Using a series of one-dimensional Gaussian quadrature rules as
+outlined above evaluate the derivative in each direction and for
+each quadrature point by completing the first part of
+the code in the file \inlsh{StdDifferentiation2D.cpp} in the
+    directory
+    
+\inlsh{\$NekDist/tutorial/fundamentals-differentiation/tutorial}.
+
+The quadrature zeros and differentiation matrices in each of the coordinate directions
+have already been setup and are initially set to $\qord_1=7,\qord_2=9$
+using a Gauss-Lobatto-Legendre quadrature rule. Complete the code by writing
+a structure of loops which implement the two-dimensional Gaussian
+quadrature rule\footnote{If you need help there is a completed version in the completed directory}. The expected  output is given below). Also verify that the
+error is zero when $\qord_1 = 8,\qord_2 = 10$.
+
+Recall that to compile the file you type
+\tutorialcommand{make StdDifferentiation2D}
+\end{tutorialtask}
+
+When executing the tutorial with the quadrature order
+$\qord_1=7,\qord_2=9$ you should get an output of the form:
+
+\begin{lstlisting}[style=BashInputStyle]
+===========================================================
+|    DIFFERENTIATION IN 2D ELEMENT in Standard Region     |
+===========================================================
+
+Differentiate the function f(x1,x2) = (x1)^7*(x2)^9
+on the standard quadrilateral element:
+         q1 = 7, q2 = 9: Error = 7.19196
+\end{lstlisting}
+
+\subsection{General straight-sided quadrilateral element}
+
+\begin{figure}[h!]
+\begin{center}
+\includegraphics[width=5cm]{img/quadmap}
+\caption{To construct a $C^0$ expansion from multiple elements 
+of specified shapes (for example, triangles or rectangles), each
+elemental region $\Omega^e$ is mapped to a standard region
+$\Omega_{st}$ in which all local operations are evaluated.}
+\label{fig.elementmap}
+\end{center}
+\end{figure}
+
+For elemental shapes with straight sides a simple mapping may be
+constructed using a linear mapping similar to the vertex modes of a
+hierarchical/modal expansion.  For the straight-sided quadrilateral
+with vertices labeled as shown in figure
+\ref{fig.elementmap}(b) the mapping can be defined as:
+\begin{eqnarray}
+x_i &=& \cmap_i(\LCcoord_1,\LCcoord_2) =
+  x_i^A \frac{(1-\LCcoord_1)}{2} \frac{(1-\LCcoord_2)}{2}
++ x_i^B \frac{(1+\LCcoord_1)}{2} \frac{(1-\LCcoord_2)}{2} \nonumber \\
+&& + x_i^D \frac{(1-\LCcoord_1)}{2} \frac{(1+\LCcoord_2)}{2}
++ x_i^C \frac{(1+\LCcoord_1)}{2} \frac{(1+\LCcoord_2)}{2}.\hspace{5mm} i = 1,2
+\label{eqn.quadmap}
+\end{eqnarray}
+
+We denote an arbitrary quadrilateral region by $\Omega^e$ which is
+a function of the global Cartesian coordinate system $(x_1,x_2)$ in
+two-dimensions. To differentiate in $\Omega^e$ we transform this region
+into the standard region $\Omega_{st}$ defined in terms of
+$(\LCcoord_1,\LCcoord_2)$. We begin with the basic definition of
+differentiation:
+\[
+\frac{du(x_1,x_2)}{dx_1} = \sum^{\qord_1-1}_{i=0} \sum^{\qord_2-1}_{j=0}
+u({x_1}_i ,{x_2}_j ) \frac{d}{dx_1} ({h_1}_i(x_1,x_2) {h_2}_j(x_1,x_2)) 
+\]
+
+Unlike differentiation in the standard region, both $h_1$ and $h_2$ are
+functions of both local coordinates. The chain rule can be applied to
+obtain a system similar to the previous exercise:
+%
+\begin{equation}
+\frac{du(x_1,x_2)}{dx_1} =
+\sum^{\qord_1-1}_{i=0} \sum^{\qord_2-1}_{j=0}
+u({x_1}_i ,{x_2}_j )
+[ {h_2}_j(\LCcoord_2) \frac{d\LCcoord_1}{dx_1} \frac{d}{d\LCcoord_1} {h_1}_i(\LCcoord_1)) + 
+{h_1}_i(\LCcoord_1) \frac{d\LCcoord_2}{dx_1} \frac{d}{d\LCcoord_2} {h_2}_j(\LCcoord_2)) ]
+\label{eqn.chainrule}
+\end{equation}
+%
+\noindent where $h_1$ and $h_2$ are functions of $\LCcoord_1$ and
+$\LCcoord_2$ respectively only and where $\frac{d\LCcoord_2}{x_1}$
+and $\frac{d\LCcoord_1}{x_1}$ come from the inverse two-dimensional
+Jacobian matrix due to the transformation, defined as:
+%
+\[
+\mathbf{J}_{2D}^{-1} = \left [ \begin{array}{cc} 
+ \displaystyle \frac{\partial x_1}{\partial \LCcoord_1} & 
+ \displaystyle \frac{\partial x_1}{\partial \LCcoord_2} \\
+ \displaystyle \frac{\partial x_2}{\partial \LCcoord_1} & 
+ \displaystyle \frac{\partial x_2}{\partial \LCcoord_2} 
+\end{array} \right ] ^{-1} = \left [ \begin{array}{cc} 
+ \displaystyle \frac{\partial \LCcoord_1}{\partial x_1} & 
+ \displaystyle \frac{\partial \LCcoord_1}{\partial x_2} \\
+ \displaystyle \frac{\partial \LCcoord_2}{\partial x_1} & 
+ \displaystyle \frac{\partial \LCcoord_2}{\partial x_2} 
+\end{array} \right ]
+\label{eqn.2djac}
+\]
+%
+
+As we have assumed that we know the form of the mapping [i.e.,  $x_1 = 
+\cmap_1(\LCcoord_1,\LCcoord_2)$, $ x_2 = \cmap_2(\LCcoord_1,\LCcoord_2)$]
+we can evaluate all the partial derivatives required to determine
+the Jacobian matrix. If the elemental
+region is straight-sided then we have seen that a mapping from
+($x_1,x_2$) $\rightarrow$ ($\LCcoord_1,\LCcoord_2$) is given by
+equations (\ref{eqn.quadmap}). 
+
+Equation (\ref{eqn.chainrule}) turns out to be similar to equation
+(\ref{eqn.2dintermediate}) in the standard region and can be 
+also rewritten in the style of equation (\ref{eqn.2dfinal}):
+%
+\begin{eqnarray}
+\left . \frac{du(x_1,x_2)}{dx_1}
+\right |_{x=({x_1}_i,{x_2}_j)} =
+\left . \frac{d\LCcoord_1}{dx_1} \right |_{x=({x_1}_i,{x_2}_j)}
+\sum^{\qord_1-1}_{k=0}
+{d_1}_{ik} \hspace{3pt} u({x_1}_k ,{x_2}_j ) \nonumber \\
++ \left . \frac{d\LCcoord_2}{dx_1} \right |_{x=({x_1}_i,{x_2}_j)}
+\sum^{\qord_2-1}_{k=0}
+{d_2}_{jk} \hspace{3pt} u({x_1}_i ,{x_2}_k )
+\label{eqn.2dlocalfinal}
+\end{eqnarray}
+%
+
+Similarly to the differentiation in the standard region,
+derivatives with respect to the other local coordinate can
+also be found by substituting $dx_2$ for $dx_1$. We can also note that
+equation (\ref{eqn.2dfinal}) is a particular case of equation
+(\ref{eqn.2dlocalfinal}) where $\frac{d\LCcoord_1}{dx_1} = 1$
+and $\frac{d\LCcoord_2}{dx_1} = 0$. This effectively corresponds
+to the situation where the local region has the same shape and
+dimensions as the standard region (with the admission of a 
+translation in the plane).
+
+\begin{tutorialtask}
+We now consider how to differentiate the function $f(x_1,x_2) = x_1^{7}\,
+x_2^{9}$ in a {\em local} rectangular quadrilateral element. Consider the
+local quadrilateral element with vertices
+\begin{eqnarray*}
+(x^A_1, x^A_2) = (0,-1),&&  (x^B_1 , x^B_2) = (1,-1),\\
+(x^C_1 ,x^C_2) = (1,1), && (x^D_1 ,x^D_2) = (0,0).
+\end{eqnarray*}
+
+This is clearly similar to the previous exercise. However, as we are
+calculating the derivatives of a function defined in a local element
+rather than in a reference element, we have to take into account the
+geometry of the element. Therefore, the implementation is altered in
+two ways:
+\begin{enumerate}
+\item  The quadrature zeros should be transformed to local
+coordinates to evaluate the function $f(x_1, x_2)$ at the quadrature
+points.
+\item  Elements of the inverse Jacobian matrix of the transformation
+between local and reference coordinates should be taken into account
+when evaluating the derivatives.
+\end{enumerate}
+
+In the file \inlsh{LocDifferentiation2D.cpp} you are provided with the
+same set up as the previous task but now with a definition of the
+coordinate mapping included. Evaluate the expression for the Jacobian
+matrix analytically and find its inverse. Then write a line of code
+in the loop for the Jacobian as indicated by the comments
+\inlsh{``Write your code here''}. When you have written your expression
+you can compile the code with the command
+
+\tutorialcommand{make LocDifferentiation2D}
+
+\end{tutorialtask}
+
+%\newpage
+Using the  quadrature order specified in the file your output should look like:
+
+\begin{lstlisting}[style=BashInputStyle]
+=========================================================
+|     DIFFERENTIATION IN 2D ELEMENT in Local Region     |
+=========================================================
+
+Differentiate the function f(x1,x2) = x1^7 * x2^9
+in a local quadrilateral element:
+         q1 = 8, q2 = 10: Average Error = 0.0346594
+\end{lstlisting}
+
+\begin{advancedtutorialtask}
+
+As it turns out in the previous task, the average error is not equal to zero.
+Why is that?
+
+Try different values of $q_1$ and $q_2$ and plot the average error
+with respect to these two parameters, either one by one or simultaneously.
+Why are the values of ${q_1}_{\max}$ and ${q_2}_{\max}$ (at which the average
+error reaches computer precision) different from those expected
+in the standard region?\footnote{Hint: How can this be explained
+by the geometry of the local element?}
+
+\end{advancedtutorialtask}
+
+\chapter{Summary}
+You should be now familiar with the following topics:
+\vspace{-0.5cm}
+\begin{itemize}
+    \item Define an \texttt{Array}, a \texttt{NekMatrix} and a \texttt{PointsKey} in \nektar. 
+    \item Use the \texttt{PointsManager} with a \texttt{PointsKey} to get hold of quadrature zeros and differentiation matrices. 
+\item Differentiate a polynomial function in the standard region  $\xi\in [-1,1]$ using Gauss-Gauss-Legendre and Gauss-Lobatto-Legendre quadrature.
+\item Extend the standard region to a standard quadrilateral region.
+\item Introduce a linear mapping from a general quadrilateral region to the standard quadrilateral region. Evaluate the Jacobian of this mapping and evaluate derivatives in a general straight sided quadrilateral region. 
+\end{itemize}
+
+\end{document}

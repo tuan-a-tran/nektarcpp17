@@ -1,0 +1,7 @@
+-- Iteration = 1, H(k+1, k) = 0.645443
+EV  Magnitude   Angle       Growth      Frequency   Residual
+ 0  6.9711e-01  0.0000e+00 -3.6081e-01  0.0000e+00  6.4544e-01
+-- Iteration = 2, H(k+1, k) = 6.0550e-08
+EV  Magnitude   Angle       Growth      Frequency   Residual
+ 0  9.7920e-01  7.2659e-01 -2.1020e-02  7.2659e-01  6.0635e-08
+ 1  9.7920e-01 -7.2659e-01 -2.1020e-02 -7.2659e-01  6.0635e-08

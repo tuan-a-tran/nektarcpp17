@@ -1,0 +1,649 @@
+\input{tutorial-preamble.tex}
+
+\title{Advection Solver}
+
+\begin{document}
+
+%\frontmatter
+
+% Render pretty title page if not building HTML
+\ifdefined\HCode
+\begin{center}
+    \includegraphics[width=0.1\textwidth]{img/icon-blue.png}
+\end{center}
+\maketitle
+\begin{center}
+       \huge{Nektar++ Tutorial}
+\end{center}
+\else
+\titlepage
+\fi
+
+\clearpage
+
+%\ifx\HCode\undefined
+%\tableofcontents*
+%\fi
+%
+%\clearpage
+
+\chapter{Introduction}
+
+Welcome to the tutorial of the Advection problem using the
+Advection-Diffusion-Reaction (ADR) Solver in the Nektar++ framework.
+This tutorial is aimed to show the main features of the ADR solver in
+a simple manner. If you have not already downloaded and installed
+Nektar++, please do so by
+visiting \href{http://www.nektar.info}{nektar.info}, where you can
+also find the
+\href{http://www.nektar.info/downloads/8}{User-Guide} with the
+instructions to install the library.
+
+This tutorial requires:
+\begin{itemize}
+    \item Nektar++ ADRSolver and pre- and post-processing tools,
+    \item the open-source mesh generator \href{http://geuz.org/gmsh/}{Gmsh},
+    \item the visualisation tool \href{http://www.paraview.org}{\underline{Paraview}}
+    or \href{https://wci.llnl.gov/simulation/computer-codes/visit/downloads}{\underline{VisIt}}
+\end{itemize}
+
+\section{Goals}
+After the completion of this tutorial, you will be familiar with:
+\vspace{-0.5cm}
+\begin{itemize}
+\item the generation of a simple mesh in Gmsh and its conversion into a Nektar++-compatible format;
+\item the visualisation of the mesh in Paraview or VisIt
+\item the setup of the initial and boundary conditions, the parameters and the solver settings;
+\item running a simulation with the ADR solver; and
+\item the post-processing of the data and the visualisation of the results in Paraview or VisIt.
+\end{itemize}
+
+\begin{tutorialtask}
+Prepare for the tutorial. Make sure that you have:
+\begin{itemize}
+  \item Installed and tested \nektar v\nekver from a binary package, or compiled it from
+      source. By default binary packages will install all executables in
+      \inlsh{/usr/bin}. If you compile from source they will be in the
+      sub-directory \inlsh{dist/bin} of the \inlsh{build} directory you 
+      created in the \nektar source tree. We will refer to the directory
+      containing the executables as \inlsh{\$NEK} for the remainder of the
+      tutorial.
+   \item Downloaded the tutorial files: 
+       \relurl{basics-advection-diffusion.tar.gz}{basics/advection-diffusion}\\
+   Unpack it using \inlsh{tar -xzvf basics-advection-diffusion.tar.gz} to produce
+   a directory \inlsh{basics-advection-diffusion} with subdirectories
+   called \inlsh{tutorial} and \inlsh{complete}.
+   
+   We will refer to the \inlsh{tutorial} directory
+as \inlsh{\$NEKTUTORIAL}.
+
+The tutorial folder contains: 
+\begin{itemize}
+\item a Gmsh file to generate the mesh, \inlsh{ADR\_mesh.geo};
+\item a .msh file containing the mesh in Gmsh format, \inlsh{ADR\_mesh.msh};
+\end{itemize}
+
+\end{itemize}
+\end{tutorialtask}
+
+\begin{tutorialtask}
+Additionally, you should also install
+\begin{itemize}
+  \item a visualization package capable of reading VTK files, such as ParaView
+  (which can be downloaded from
+  \href{http://www.paraview.org/download/}{\underline{here}}) or VisIt
+  (downloaded from 
+  \href{https://wci.llnl.gov/simulation/computer-codes/visit/downloads}{\underline{here}}).
+  Alternatively, you can generate Tecplot formatted .dat files for use with
+  Tecplot.
+  %\item a plotting program capable of reading data from ASCII text files, such
+  %as GNUPlot or MATLAB.
+\end{itemize}
+\end{tutorialtask}
+
+\section{Background}
+The ADR solver can solve various problems, including the unsteady
+advection, unsteady diffusion, unsteady advection diffusion equation,
+etc. For a more detailed description of this solver, please refer to
+the \href{http://www.nektar.info/downloads/8}{User-Guide}.
+
+In this tutorial we focus on the unsteady advection equation
+\begin{equation}
+\dfrac{\partial u}{\partial t} + \mathbf{V}\cdot\nabla u = 0,
+\label{eq:advection}
+\end{equation}
+where $u$ is the independent variable and $\mathbf{V} =
+[\text{V}_{x}\; \text{V}_{y}\; \text{V}_{z}]$ is the advection
+velocity. The unsteady advection equation can be solved in one, two
+and three spatial dimensions. We will here consider a two-dimensional
+problem, so that $\mathbf{V} = [\text{V}_{x}\; \text{V}_{y}]$.
+
+\section{Problem description}
+The problem we want to run consists of a given initial condition
+(which depends on $x$ and $y$) travelling in the $x$-direction at a
+constant advection velocity. To model this problem we create a
+computational domain also referred to as mesh or grid (see
+section \ref{adr-pre}) on which we apply the following two-dimensional
+function as initial condition and periodic as well as time-dependent
+Dirichlet boundary conditions at the mesh boundaries
+%
+\begin{equation}
+\begin{array}{l}
+\dfrac{\partial u}{\partial t} + \text{V}_{x}\dfrac{\partial u}{\partial x} + \text{V}_{y}\dfrac{\partial u}{\partial y} = 0,\\[1em]
+u(x,y;\;t=0) = \sin(\kappa x) \cos(\kappa y),\\[1em]
+u(x_{b} = [-1, 1],y_{b};\;t) = \text{periodic},\\[1em]
+u(x_{b},y_{b} = [-1, 1];\;t) = \sin(\kappa (x - \text{V}_{x}\,t)) \cos(\kappa (y - \text{V}_{y}\,t)),
+\end{array}
+\label{eq:advection-2d}
+\end{equation}
+%
+where $x_{b}$ and $y_{b}$ represent the boundaries of the
+computational domain (see section \ref{adr-configuring}),
+$\text{V}_{x} = 2, \text{V}_{y} = 0$ and $\kappa = 2\pi$.
+
+We successively setup the other parameters of the problem, such as the
+time-step, the time-integration scheme, the I/O configuration,
+etc. (see section \ref{adr-configuring}). We finally run the solver
+(see section
+\ref{adr-running}) and post-process the data in order to visualise the results (see section \ref{adr-post}).
+
+\chapter{Pre-processing}
+
+As already mentioned to set up the probelm we have two step. The first
+is setting up a mesh in an input xml format consistent with Nektar++
+as discussed in section \ref{adr-pre}. We also need to configure the
+problem initial, boundary and parameters which are discussed
+in \ref{adr-configuring}.
+
+\section{Mesh generation}
+\label{adr-pre}
+The first pre-processing step consists in generating the mesh in a
+Nektar++ compatible format.  One option to do this is to use the
+open-source mesh-generator Gmsh to first create the geometry, that in
+our case is a square and successively the mesh. The mesh format
+provided by Gmsh shown in Fig. (\ref{f:gmsh}) - i.e. .msh extension -
+is not consistent with the Nektar++ solvers and, therefore, it needs
+to be converted.
+%
+\begin{figure}[h!]
+\begin{center}
+\includegraphics[width=5cm]{img/ADR_mesh_gmsh}
+\caption{Mesh generated by Gmsh.}
+\label{f:gmsh}
+\end{center}
+\end{figure}
+%
+To do so, we need to run the pre-processing routine
+called \inltt{NekMesh} within Nektar++.  This routine requires two
+line arguments, the mesh file generated by
+Gmsh, \inlsh{ADR\_mesh.msh}, and the name of the Nektar++-compatible
+mesh file that \inltt{NekMesh} will generate, for
+instance \inlsh{ADR\_mesh.xml}. The command line for this step is
+%
+\begin{tutorialtask}
+Convert the .meh file into a Nektar++ input by calling
+\tutorialcommand{\$NEK/NekMesh ADR\_mesh.msh  ADR\_mesh.xml}
+or 
+\tutorialcommand{\$NEK/NekMesh ADR\_mesh.msh  ADR\_mesh.xml:xml:uncompress}
+\end{tutorialtask}
+%
+Note that by default the information is stored in Xml blocks of
+compressed data to reduce the size of large meshes. The second command
+above tells the converter \inltt{NekMesh} to write the file out in
+uncompressed format.  The generated .xml mesh file is reported below
+and can also be found in the \inlsh{completed} directory.  It contains
+5 tags encapsulated within the \inltt{GEOMETRY} tag, which describes
+the mesh.  The first tag, \inltt{VERTEX}, contains the spatial
+coordinates of the vertices of the various elements of the mesh. The
+second tag, \inltt{EDGE} contains the lines connecting the vertices.
+The third tag, \inltt{ELEMENT}, defines the elements (note that in
+this case we have both triangular - e.g. \inltt{<T ID="0">} - as well
+as quadrilateral - e.g. \inltt{<Q ID="85">} - elements). The fourth
+tag, \inltt{COMPOSITE}, is constituted by the physical regions of the
+mesh called \textbf{composite}, where the composites formed by
+elements represent the solution sub-domains - i.e. the mesh
+sub-domains where we want to solve the linear advection problem (note
+that we will use these composites to define expansion bases on each
+sub-domain in section \ref{adr-configuring}) - while the composites
+formed by edges are the boundaries of the domain where we need to
+apply suitable boundary conditions (note that we will use these
+composites to specify the boundary conditions in
+section \ref{adr-configuring}).  Finally, the fifth
+tag, \inltt{DOMAIN}, formally specifies the overall solution domain as
+the union of the three composites forming the three solution
+subdomains (note that the specification of three subdomain -
+i.e. composites - in this case is necessary since they are constituted
+by different element shapes). For additional details on
+the \inltt{GEOMETRY} tag refer to
+the \href{http://www.nektar.info/downloads/8}{User-Guide}.
+%
+\begin{lstlisting}[style=XMLStyle]
+<?xml version="1.0" encoding="utf-8" ?>
+<NEKTAR>
+    <GEOMETRY DIM="2" SPACE="2">
+        <VERTEX>
+            <V ID="0">2.00000000e-01 -1.00000000e+00 0.00000000e+00</V>
+            <V ID="1">5.09667784e-01 -6.15240515e-01 0.00000000e+00</V>
+            ...
+            <V ID="68">-1.00000000e+00 1.25000000e-01 0.00000000e+00</V>
+        </VERTEX>
+        <EDGE>
+            <E ID="0">    0  1   </E>
+            <E ID="1">    1  2   </E>
+            ...
+            <E ID="153">   40  68   </E>
+        </EDGE>
+        <ELEMENT>
+            <T ID="0">    0     1     2 </T>
+            <T ID="1">    3     4     5 </T>
+            ...
+            <Q ID="85">  146    93   153   151 </Q>
+       </ELEMENT>
+        <COMPOSITE>
+            <C ID="1"> T[0-30] </C>
+            <C ID="2"> Q[62-85] </C>
+            <C ID="3"> T[31-61] </C>
+            <C ID="100"> E[46,12,20,10,45] </C>
+            <C ID="200"> E[50,32,108,111,114,117,87,103] </C>
+            <C ID="300"> E[100,64,74,66,99] </C>
+            <C ID="400"> E[49,33,148,150,152-153,86,104] </C>
+        </COMPOSITE>
+        <DOMAIN> C[1,2,3] </DOMAIN>
+    </GEOMETRY>
+</NEKTAR>
+\end{lstlisting}      
+%
+After having generated the mesh file in a Nektar++-compatible
+format, \inlsh{ADR\_mesh.xml}, we can visualise the mesh.  This
+step can be done by using the following Nektar++ built-in
+post-processing routine:
+%
+\begin{tutorialtask} Convert the .xml file into a .vtu format by calling
+\tutorialcommand{\$NEK/FieldConvert ADR\_mesh.xml  ADR\_mesh.vtu}
+Alternatively a tecplot .dat file can be created by changing the extension of the second file, i.e. 
+\tutorialcommand{\$NEK/FieldConvert ADR\_mesh.xml  ADR\_mesh.dat}
+\end{tutorialtask}
+%
+This will produce a \inlsh{ADR\_mesh.vtu} file which can be directly
+read by the open-source visualisation tool called Paraview or VisIt. In
+Fig. \ref{f:Mesh} we show the mesh distribution for the mesh
+considered in this tutorial, \inlsh{ADR\_mesh.xml}.
+%
+\begin{figure}[h!]
+\begin{center}
+\includegraphics[width=0.4\textwidth]{img/ADR_mesh}
+\caption{Mesh distribution with local polynomial subdivision}
+\label{f:Mesh}
+\end{center}
+\end{figure}
+%
+Before configuring the input files, if we want to use periodic
+boundary conditions, we need to make sure that the edges of the two
+periodic boundaries (i.e. $x_{b} = [-1, 1], y_{b}$) are properly
+aligned. Gmsh and the \inltt{NekMesh} routine within Nektar++ does
+not guarantee proper alignment. However, \inltt{NekMesh} provides
+a module, called \inltt{peralign}, that enforces the reordering of
+pair of edges (for more details refer to
+the \href{http://www.nektar.info/downloads/8}{User-Guide}.  We can
+apply this by using the following command:
+%
+\begin{tutorialtask} Convert the .xml file into a .xml file with periodic edges aligned
+\tutorialcommand{\$NEK/NekMesh -m peralign:surf1=200:surf2=400:dir=x ADR\_mesh.xml ADR\_mesh\_aligned.xml}
+\end{tutorialtask}
+%
+where \inltt{-m peralign} is selecting the module for aligning the
+edges which are specified by \inltt{surf1} and \inltt{surf2} (their
+IDs in this case are 200 and 400) and \inltt{dir} is the direction to
+which the two periodic edges are perpendicular (in this case
+$x$). Note that since we have not used the
+extension \inlsh{:xml:uncompress} the blocks of data in this file are
+now stored in compressed format.
+
+After having typed the last command, we have a
+mesh, \inlsh{ADR\_mesh\_aligned.xml}, which is fully compatible with
+Nektar++ and which allows us applying periodic boundary conditions
+without encountering errors.
+
+We can therefore now configure the conditions: initial conditions,
+boundary conditions, parameters and solver settings.
+
+\section{Configuring problem definitions}
+\label{adr-configuring}
+
+To set the various problem parameters, the solver settings, initial and
+boundary conditions and the expansion basese, we use the file
+called \inltt{ADR\_conditions.xml}, which can be found within the
+\inlsh{tutorial} directory for this tutorial.  This new file contains
+the \inltt{CONDITIONS} tag where we can specify the parameters of the
+simulations, the solver settings, the initial conditions, the boundary
+conditions and the exact solution and contains the \inltt{EXPANSIONS}
+tag where we can specify the polynomial order to be used inside each
+element of the mesh, the type of expansion bases and the type of
+points.
+
+We begin to describe the \inltt{ADR\_conditions.xml} file from
+the \inltt{CONDITIONS} tag, and in particular from the boundary
+conditions, initial conditions and exact solution sections:
+%
+\begin{lstlisting}[style=XMLStyle]
+<CONDITIONS>
+    ...
+    ...
+    ...
+    <VARIABLES>
+        <V ID="0"> u </V>
+    </VARIABLES>
+        
+    <BOUNDARYREGIONS>
+        <B ID="0"> C[100] </B>
+        <B ID="1"> C[200] </B>
+        <B ID="2"> C[300] </B>
+        <B ID="3"> C[400] </B>
+    </BOUNDARYREGIONS>
+        
+    <BOUNDARYCONDITIONS>
+        <REGION REF="0">
+            <D VAR="u" USERDEFINEDTYPE="TimeDependent"
+            VALUE="sin(k*(x-advx*t))*cos(k*(y-advy*t))" />
+        </REGION>
+        <REGION REF="1">
+            <P VAR="u" VALUE="[3]" />
+        </REGION>
+        <REGION REF="2">
+             <D VAR="u" USERDEFINEDTYPE="TimeDependent"
+            VALUE="sin(k*(x-advx*t))*cos(k*(y-advy*t))" />
+        </REGION>
+        <REGION REF="3">
+            <P VAR="u" VALUE="[1]" />
+        </REGION>
+    </BOUNDARYCONDITIONS>
+        
+    <FUNCTION NAME="InitialConditions">
+        <E VAR="u"  VALUE="sin(k*x)*cos(k*y)" />
+    </FUNCTION>
+    
+    <FUNCTION NAME="AdvectionVelocity">
+        <E VAR="Vx" VALUE="advx" />
+        <E VAR="Vy" VALUE="advy" />
+    </FUNCTION>
+        
+    <FUNCTION NAME="ExactSolution">
+        <E VAR="u"  VALUE="sin(k*(x-advx*t))*cos(k*(y-advy*t))" />
+    </FUNCTION>
+</CONDITIONS>
+\end{lstlisting}
+%
+In the above piece of \inltt{.xml}, we first need to specify the
+non-optional tag called \inltt{VARIABLES} that sets the solution
+variable (in this case $u$).
+
+The second tag that needs to be specified is \inltt{BOUNDARYREGIONS}
+through which the user can specify the regions where to apply the
+boundary conditions.  For instance, \inltt{<B ID="0"> C[100] </B>}
+indicates that composite 100 (which has been introduced in
+section \ref{adr-pre}) has a \textbf{boundary ID} equal to 0. This
+boundary ID is successively used to prescribe the boundary conditions.
+
+The third tag is \inltt{BOUNDARYCONDITIONS} by which the boundary
+conditions are actually specified for each \textbf{boundary ID}
+specified in the \inltt{BOUNDARYREGIONS} tag. The syntax \inltt{<D
+VAR="u"} corresponds to a \inltt{D}irichlet boundary condition for the
+variable \inltt{u} (note that in this case we used the additional
+tag \inltt{USERDEFINEDTYPE="TimeDependent"} which is a special option
+when using time-dependent boundary conditions), while \inltt{<P
+VAR="u"} corresponds to \inltt{P}eriodic boundary conditions. For
+additional details on the various options possible in terms of
+boundary conditions refer to
+the \href{http://www.nektar.info/downloads/8}{User-Guide}.
+
+Finally, \inltt{<FUNCTION NAME="InitialConditions">} allows the
+specification of the initial conditions, \inltt{<FUNCTION
+NAME="AdvectionVelocity">} specifies the advection velocities in both
+the $x$- and $y$-direction (for this two-dimensional case) and is a
+non-optional parameters for the unsteady advection equation
+and \inltt{<FUNCTION NAME="ExactSolution">} permits us to provide the
+exact solution, against which the L$_{2}$ and L$_{\infty}$ errors are
+computed.
+
+After having configured the \inltt{VARIABLES} tag, the initial and
+boundary conditions, the advection velocity and the exact solution we
+can complete the tag \inltt{CONDITIONS} prescribing the parameters
+necessary (\inltt{PARAMETERS})and the solver settings
+(\inltt{SOLVERINFO}):
+%
+\begin{lstlisting}[style=XMLStyle]
+<CONDITIONS>
+    <PARAMETERS>
+        <P> FinTime  		= 1.0               		</P>
+        <P> TimeStep 		= 0.001             		</P>
+        <P> NumSteps 		= FinTime/TimeStep </P>
+        <P> IO_CheckSteps = 100               		</P>
+        <P> IO_InfoSteps 	= 100               		</P>
+        <P> advx 			= 2.0               		</P>
+        <P> advy 			= 0.0               		</P>
+        <P> k 			= 2*PI              		</P>
+    </PARAMETERS>
+        
+    <SOLVERINFO>
+        <I PROPERTY="EQTYPE"                		VALUE="UnsteadyAdvection"   		/>
+        <I PROPERTY="Projection"            		VALUE="DisContinuous"       		/>
+        <I PROPERTY="AdvectionType"      		VALUE="WeakDG"              		/>
+        <I PROPERTY="UpwindType"           	VALUE="Upwind"              		/>
+        <I PROPERTY="TimeIntegrationMethod" 	VALUE="ClassicalRungeKutta4"	/>
+    </SOLVERINFO>
+    ...
+    ...
+    ...
+\end{lstlisting}
+%
+In the \inltt{PARAMETERS} tag, \inltt{FinTime} is the final physical
+time of the simulation, \inltt{TimeStep} is the
+time-step, \inltt{NumSteps} is the number of
+steps, \inltt{IO\_CheckSteps} is the step-interval when a output file
+is written, \inltt{IO\_InfoSteps} is the step-interval when some
+information about the simulation are printed to the
+screen, \inltt{advx} and \inltt{advy} are the advection velocities
+V$_{x}$ and V$_{y}$, respectively and \inltt{k} is the $\kappa$
+parameter. Note that \inltt{advx}, \inltt{advy} and \inltt{k} are used
+in the boundary and initial conditions tags as well as in the
+specification of the advection velocities.
+
+In the \inltt{SOLVERINFO} tag, \inltt{EQTYPE} is the type of equation
+to be solved, \inltt{Projection} is the spatial projection operator to
+be used (which in this case is specified to be `DisContinuous'),
+\inltt{AdvectionType} is the advection operator to be adopted (where the \inltt{VALUE} `WeakDG' implies the use of a weak Discontinuous Galerkin technique), \inltt{UpwindType} is the numerical 
+flux to be used at the element interfaces when a discontinuous
+projection is used, \inltt{TimeIntegrationMethod} allows selecting the
+time-integration scheme. For additional solver-setting options refer
+to the \href{http://www.nektar.info/downloads/8}{User-Guide}.
+
+Finally, we need to specify the expansion bases we want to use in each
+of the three composites or sub-domains (\inltt{COMPOSITE=".."})
+introduced in section \ref{adr-pre}:
+%
+\begin{lstlisting}[style=XMLStyle]
+<EXPANSIONS>
+    <E COMPOSITE="C[1]" NUMMODES="5" TYPE="MODIFIED" FIELDS="u" />
+    <E COMPOSITE="C[2]" NUMMODES="5" TYPE="MODIFIED" FIELDS="u" />
+    <E COMPOSITE="C[3]" NUMMODES="5" TYPE="MODIFIED" FIELDS="u" />
+</EXPANSIONS>
+\end{lstlisting}
+%
+In particular, for all the composites, \inltt{COMPOSITE="C[i]"} with
+i=1,2,3 we select identical basis functions and polynomial order,
+where \inltt{NUMMODES} is the number of coefficients we want to use
+for the basis functions (that is commonly equal to P+1 where P is the
+polynomial order of the basis functions), \inltt{TYPE} allows
+selecting the basis functions \inltt{FIELDS} is the solution variable
+of our problem and \inltt{COMPOSITE} are the mesh regions created by
+Gmsh. For additional details on the \inltt{EXPANSIONS} tag refer to
+the \href{http://www.nektar.info/downloads/8}{User-Guide}.
+
+\begin{tutorialtask}
+Generate the file \inlsh{ADR\_conditions.xml} or copy it from
+the \inlsh{completed} directory.
+\end{tutorialtask}
+
+
+\chapter{Running the solver}
+\label{adr-running}
+Now that we have the mesh file compatible with Nektar++ and periodic
+boundary conditions,
+\inlsh{ADR\_mesh\_aligned.xml}, and we have completed the condition file,
+\inlsh{ADR\_conditions.xml}, we can run the solver by using the following command:
+%
+\begin{tutorialtask}
+Run the ADRSolver using the command: 
+\tutorialcommand{\$NEK/ADRSolver ADR\_mesh\_aligned.xml
+    ADR\_conditions.xml}
+\end{tutorialtask}
+%
+Note that we have written the mesh in a separate file from the
+conditions. This is generally more efficient because it allows
+reopening just the condition file which is much smaller in size than
+the mesh file (especially for large problems). However, we could also
+have written both the mesh and the conditions in unique file and used
+the same command as above for running the solver (in this case with
+just one file instead of two as line argument).
+
+As soon as the file finishes running, we should see the following
+screen output:
+%
+\begin{lstlisting}[style=BashInputStyle]
+=========================================
+	        EquationType: UnsteadyAdvection
+	        Session Name: ADR_mesh_aligned
+	        Spatial Dim.: 2
+	  Max SEM Exp. Order: 5
+	      Expansion Dim.: 2
+	      Riemann Solver: Upwind
+	      Advection Type: 
+	     Projection Type: Discontinuous Galerkin
+	           Advection: explicit
+	           Diffusion: explicit
+	           Time Step: 0.001
+	        No. of Steps: 1000
+	 Checkpoints (steps): 100
+	    Integration Type: ClassicalRungeKutta4
+==========================================
+Initial Conditions:
+  - Field u: sin(k*x)*cos(k*y)
+Writing: "ADR_mesh_aligned_0.chk"
+Steps: 100      Time: 0.1          CPU Time: 0.435392s
+Writing: "ADR_mesh_aligned_1.chk"
+Steps: 200      Time: 0.2          CPU Time: 0.430588s
+Writing: "ADR_mesh_aligned_2.chk"
+Steps: 300      Time: 0.3          CPU Time: 0.428503s
+Writing: "ADR_mesh_aligned_3.chk"
+Steps: 400      Time: 0.4          CPU Time: 0.428529s
+Writing: "ADR_mesh_aligned_4.chk"
+Steps: 500      Time: 0.5          CPU Time: 0.430142s
+Writing: "ADR_mesh_aligned_5.chk"
+Steps: 600      Time: 0.6          CPU Time: 0.429481s
+Writing: "ADR_mesh_aligned_6.chk"
+Steps: 700      Time: 0.7          CPU Time: 0.433232s
+Writing: "ADR_mesh_aligned_7.chk"
+Steps: 800      Time: 0.8          CPU Time: 0.431088s
+Writing: "ADR_mesh_aligned_8.chk"
+Steps: 900      Time: 0.9          CPU Time: 0.427919s
+Writing: "ADR_mesh_aligned_9.chk"
+Steps: 1000     Time: 1            CPU Time: 0.436098s
+Writing: "ADR_mesh_aligned_10.chk"
+Time-integration  : 4.31097s
+Writing: "ADR_mesh_aligned.fld"
+-------------------------------------------
+Total Computation Time = 4s
+-------------------------------------------
+L 2 error (variable u) : 0.00863475
+L inf error (variable u) : 0.0390366
+\end{lstlisting}
+%
+where the L2 and L inf errors are evaluated against
+the \inltt{<FUNCTION NAME="ExactSolution">} provided in
+the \inlsh{ADR\_conditions.xml} file. To have a more detailed view on
+the solver settings and parameters used, it is possible to use
+the \inltt{-v} option (which stands for verbose) as follows:
+%
+\begin{tutorialtask}
+Rerun the \inlsh{ADRSolver} with the verbose option: 
+\tutorialcommand{\$NEK/ADRSolver -v  ADR\_mesh\_aligned.xml ADR\_conditions.xml}
+\end{tutorialtask}
+
+%
+The simulation has now produced 11 \inlsh{.chk} binary files and a
+final \inlsh{.fld} binary file (which in this case is identical to the
+tenth \inlsh{.chk} file). These binary files contain the result of the
+simulation every 100 time-steps. This output interval has been chosen
+through the parameter \inltt{IO\_CheckSteps}
+in \inlsh{ADR\_conditions.xml}, which was set equal to 100. Also, it
+is possible to note that every 100 time-steps the solver outputs the
+physical time of the simulation and the CPU time required for doing
+100 time-steps. The interval of 100 time-steps is decided through the
+parameter \inltt{IO\_InfoSteps}, which was also equal to 100.
+
+
+\chapter{Post-processing}
+\label{adr-post}
+Now that the simulation has been completed, we need to post-process
+the file in order to visualise the results. In order to do so, we can
+use the built-in post-processing routines within Nektar++.  In
+particular, we can use the following command
+%
+\begin{tutorialtask} Convert the .xml and .chk files into a .vtu format by calling
+\tutorialcommand{\$NEK/FieldConvert
+    ADR\_mesh\_aligned.xml ADR\_conditions.xml  
+    ADR\_mesh\_aligned\_0.chk ADR\_mesh\_aligned\_0.vtu}
+\end{tutorialtask}
+%
+which generates a \inlsh{.vtu} file that is a readable format for the
+open-source package Paraview.  Note that we typically have to specify
+both the mesh \inlsh{.xml} file and the condition \inlsh{.xml}
+file. We can now open the \inlsh{.vtu} file just generated (which
+corresponds to the initial condition, being the number
+`0' \inlsh{.chk} file) and visualise it with Paraview. This produces
+the image in Fig.~(\ref{f:IC}).
+%
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.4\textwidth]{img/ADR_mesh_IC}
+\caption{Initial solution}
+\label{f:IC}
+\end{figure}~
+%
+It is possible to use the same post-processing command for visualising
+the other \inlsh{.chk}, thus monitoring the evolution of the
+simulation in time.
+
+\chapter{Summary}
+You should be now familiar with the following topics:
+\vspace{-0.5cm}
+\begin{itemize}
+\item Generate a simple mesh in Gmsh and convert it in a Nektar++-compatible format;
+\item Visualise the  mesh in Paraview;
+\item Setup the initial and boundary conditions, the parameters and the solver settings;
+\item Run the ADR solver; and
+\item Post-process the data in order to visualise results in Paraview.
+\end{itemize}
+
+
+\section{Additional Exercises}
+\begin{enumerate}
+\item Increase the polynomial order and plot the L$_{2}$ error vs. the polynomial order in a semilogarithmic scale.
+\item Change the projection operator for a fixed polynomial order and look at the error.
+\item Increase the time-step for a fixed polynomial order and look at the error.
+\item If the solver is compiled with the MPI option, then try running the case in parallel 
+with \inlsh{mpirun -np 2}.
+\item Change the Projection Operator to Continuous to see the same problem running with a CG solver.
+\item Change the solver type to AdvectionDiffusion and CG to change
+  the problem type.  You also need to update the AdvectionType to
+  NonConservative.  
+\end{enumerate}
+
+\begin{tipbox}
+To check the additional settings and parameters that can be used for
+this solver, check the folder: \textsf{\$NEK/solvers/ADRSolver/Tests/}
+where you can find several tests associated to the ADR solver.
+\end{tipbox}
+
+
+\end{document}

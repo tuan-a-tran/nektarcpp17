@@ -1,0 +1,341 @@
+\input{tutorial-preamble.tex}
+
+\title{Global Stability Analysis: \\
+Flow over a Backward-Facing Step}
+
+\begin{document}
+
+%\frontmatter
+
+% Render pretty title page if not building HTML
+\ifdefined\HCode
+\begin{center}
+    \includegraphics[width=0.1\textwidth]{img/icon-blue.png}
+\end{center}
+\maketitle
+\begin{center}
+       \huge{Nektar++ Tutorial}
+\end{center}
+\else
+\titlepage
+\fi
+
+\clearpage
+
+%\ifx\HCode\undefined
+%\tableofcontents*
+%\fi
+%
+%\clearpage
+
+\chapter{Introduction}
+
+This tutorial further explores the use of the spectral/$hp$ element
+framework \nektar to perform global stability computations.
+Information on how to install the libraries, solvers, and utilities on your own
+computer is available on the webpage \href{http://www.nektar.info}{\underline{www.nektar.info}}.
+
+
+This tutorial assumes the reader has already completed the previous tutorials in the Flow Stability series on the channel and cylinder and therefore already has the necessary software installed.
+
+\begin{tutorialtask}
+Prepare for the tutorial. Make sure that you have:
+\begin{itemize}
+   \item Downloaded the tutorial files: 
+       \relurl{flow-stability-bfs.tar.gz}{flow-stability/bfs}\\
+   Unpack it using
+   \inlsh{unzip flow-stability-bfs.tar.gz}
+   to produce a directory \inlsh{flow-stability-bfs} with subdirectories called \inlsh{tutorial} and
+   \inlsh{complete}
+   We will refer to the \inlsh{tutorial} directory
+   as \inlsh{\$NEKTUTORIAL}. 
+\end{itemize}
+\end{tutorialtask}
+
+In this tutorial we will perform a transient growth analysis of the flow over a
+backward-facing step. This is an important case which allows us to understand
+the effects of separation due to abrupt changes of geometry in an open flow. 
+The transient growth analysis consists of computing the maximum energy 
+growth, $G(\tau)$, attainable over all possible initial conditions $\mathbf{u}' (0)$ 
+for a specified time horizon $\tau$. It can be demonstrated that it is equivalent 
+to calculating the largest eigenvalue of $\mathcal{A}^*(\tau)\mathcal{A}(\tau)$,
+with $\mathcal{A}$ and $\mathcal{A}^*$ being the direct and the adjoint 
+operators, respectively. Also note that the eigenvalue must necessarily 
+be real since $\mathcal{A}^*(\tau)\mathcal{A}(\tau)$ is self-adjoint in this 
+case.
+
+%
+\begin{itemize}
+\item Folder \texttt{geometry}
+\begin{itemize}
+\item  \texttt{bfs.geo} - \gmsh file that contains the geometry of the problem
+\item \texttt{bfs.msh} - \gmsh generated mesh data listing mesh vertices and 
+elements.
+\end{itemize}
+
+\item Folder \texttt{base}
+\begin{itemize}
+\item \texttt{bfs-Base.xml} - \nektar session file, generated with the
+\texttt{\$NEK/NekMesh} utility, for computing the base flow.
+\item \texttt{bfs-Base.fld} - \nektar field file that contains the base flow,
+generated using \\\texttt{bfs-Base.xml}.
+\end{itemize}
+
+\item Folder \texttt{stability}
+\begin{itemize}
+\item \texttt{bfs\_tg.xml} - \nektar session file, generated with
+\texttt{\$NEK/NekMesh}, for performing the transient growth analysis.
+\item \texttt{bfs\_tg.bse} - \nektar field file that contains the base flow. 
+It is the same as the \texttt{.fld} file present in the folder \texttt{Base}.
+\end{itemize}
+\end{itemize}
+%
+Figure \ref{bfs_mesh_full} shows the mesh, along with a detailed view 
+of the step edge, that we will use for the computation. The geometry 
+is non-dimensionalised by the step height. The domain has an inflow
+length of 10 upstream of the step edge and a downstream channel 
+of length 50. The mesh consist of $N=430$ elements. Note that in 
+this case the mesh is composed of both triangular and quadrilateral 
+elements. A refined triangular unstructured mesh is used near the step 
+to capture the separation effects, whereas the inflow/outflow channels 
+have a structure similar to the previous example. Therefore in the 
+\texttt{EXPANSION} section of the \texttt{bfs-Base.xml} file, two composites 
+(\texttt{C[0]} and \texttt{C[1]}) are present. For this example, we will use 
+the modal basis with 7th-order polynomials.
+
+We will perform simulations at $Re=500$, since it is well-known that
+for this value the flow presents a strong convective instability.
+
+\chapter{Computation of the base flow}
+The file \texttt{bfs\_tg.bse} is the output of the base-flow computation that should
+be run for a non-dimensional time of $t \ge 300$ to ensure that the solution is
+steady.
+%
+\begin{figure}
+\centering
+\includegraphics[scale=0.4]{img/mesh_bfs}
+\caption{Mesh used for the backward-facing step}
+\label{bfs_mesh_full}
+\end{figure}
+%
+
+\begin{tutorialtask}
+Convert the base flow field file \texttt{bfs\_tg.bse} into VTK format to look 
+at the profile of the base flow. Note the separation at the step-edge and 
+the reattachment downstream.
+\end{tutorialtask}
+
+The streamwise component of the velocity, $u$, should look like in figure 
+\ref{bfs_u}.
+%
+\begin{figure}
+\centering
+\includegraphics[scale=0.4]{img/bfs_u}
+\caption{Streamwise component of the velocity of the backward-facing 
+step base flow.}
+\label{bfs_u}
+\end{figure}
+%
+
+
+\chapter{Stability analysis}
+We will now perform transient growth analysis with a Krylov subspace 
+of \texttt{kdim=4}. The parameters and properties needed for this are 
+present in the file \texttt{bfs\_tg.xml} in \texttt{\$NEKTUTORIAL/stability}. 
+In this case the \texttt{Arpack} library was used to compute the largest 
+eigenvalue of the system and the corresponding eigenmode. We will 
+compute the maximum growth for a time horizon of $\tau=1$, usually 
+denoted $G(1)$.
+
+\begin{tutorialtask}
+Configure the \texttt{bfs\_tg.xml} session for performing transient 
+growth analysis:
+\begin{itemize}
+\item Set the \texttt{EvolutionOperator} to \texttt{TransientGrowth}.
+\item Define a parameter \texttt{FinalTime} that is equal to 1 (this 
+is the time horizon $\tau$).
+\item Set the number of steps (\texttt{NumSteps}) to be the ratio 
+between the final time and the time step.
+\item Since the simulations take several iterations to converge, 
+use the restart file \texttt{bfs\_tg.rst} for the initial condition. 
+This file contains an eigenmode of the system.
+\end{itemize}
+
+Now run the simulation
+\tutorialcommand{IncNavierStokesSolver bfs\_tg.xml}
+\end{tutorialtask}
+
+The terminal screen should look like this:
+%
+\begin{lstlisting}[style=BashInputStyle]
+=======================================================================
+	        EquationType: UnsteadyNavierStokes
+	        Session Name: bfs_tg
+	        Spatial Dim.: 2
+	  Max SEM Exp. Order: 7
+	      Expansion Dim.: 2
+	     Projection Type: Continuous Galerkin
+	           Advection: explicit
+	           Diffusion: explicit
+	           Time Step: 0.002
+	        No. of Steps: 500
+	 Checkpoints (steps): 500
+	    Integration Type: IMEXOrder2
+=======================================================================
+	Arnoldi solver type    : Arpack
+	Arpack problem type    : LM
+	Single Fourier mode    : false 
+	Beta set to Zero       : false 
+	Evolution operator     : TransientGrowth
+	Krylov-space dimension : 4
+	Number of vectors      : 1
+	Max iterations         : 500
+	Eigenvalue tolerance   : 1e-06
+======================================================
+Initial Conditions:
+Field p not found.
+Field p not found.
+  - Field u: from file bfs_tg.rst
+  - Field v: from file bfs_tg.rst
+  - Field p: from file bfs_tg.rst
+Writing: "bfs_tg_0.chk"
+	Inital vector       : input file  
+Iteration 0, output: 0, ido=1 Steps: 500      Time: 1     CPU Time: 10.4384s
+Writing: "bfs_tg_1.chk"
+Time-integration  : 10.4384s
+Steps: 500      Time: 29           CPU Time: 8.96463s
+Writing: "bfs_tg_1.chk"
+Time-integration  : 8.96463s
+Writing: "bfs_tg.fld"
+Iteration 1, output: 0, ido=1 Steps: 500      Time: 2     CPU Time: 8.90168s
+Writing: "bfs_tg_1.chk"
+Time-integration  : 8.90168s
+Steps: 500      Time: 30           CPU Time: 8.90607s
+Writing: "bfs_tg_1.chk"
+Time-integration  : 8.90607s
+Iteration 2, output: 0, ido=1 Steps: 500      Time: 3     CPU Time: 8.96875s
+Writing: "bfs_tg_1.chk"
+Time-integration  : 8.96875s
+Steps: 500      Time: 31           CPU Time: 8.92276s
+Writing: "bfs_tg_1.chk"
+Time-integration  : 8.92276s
+Iteration 3, output: 0, ido=1 Steps: 500      Time: 4     CPU Time: 8.92597s
+Writing: "bfs_tg_1.chk"
+Time-integration  : 8.92597s
+Steps: 500      Time: 32           CPU Time: 8.96103s
+Writing: "bfs_tg_1.chk"
+Time-integration  : 8.96103s
+Iteration 4, output: 0, ido=99 
+Converged in 4 iterations
+Converged Eigenvalues: 1
+         Magnitude   Angle       Growth      Frequency
+EV: 0 3.23586     0           1.1743      0           
+Writing: "bfs_tg_eig_0.fld"
+L 2 error (variable u) : 0.0118694
+L inf error (variable u) : 0.0118647
+L 2 error (variable v) : 0.0174185
+L inf error (variable v) : 0.0244285
+L 2 error (variable p) : 0.0109063
+L inf error (variable p) : 0.0138423
+\end{lstlisting}
+%
+Initially, the solution will be evolved forward in time using the operator
+$\mathcal{A}$ , then backward in time through the adjoint operator
+$\mathcal{A}^*$. 
+%
+\begin{tutorialtask}
+Verify that the leading eigenvalue is equal to $\lambda= 3.23586$.
+\end{tutorialtask}
+%
+The leading eigenvalue corresponds to the largest possible transient growth 
+at the time horizon $\tau=1$. The leading eigenmode is shown in figures 
+\ref{bfs_eig_u} and \ref{bfs_eig_v}. 
+This is the optimal initial condition which will lead to the greatest growth 
+when evolved under the linearised Navier-Stokes equations.
+%
+\begin{figure}
+\centering
+\includegraphics[scale=0.3]{img/bfs_eig_u.png}
+\caption{$u'$-component of the eigenmode}
+\label{bfs_eig_u}
+\end{figure}
+%
+%
+\begin{figure}
+\centering
+\includegraphics[scale=0.3]{img/bfs_eig_v.png}
+\caption{$v'$-component of the eigenmode}
+\label{bfs_eig_v}
+\end{figure}
+%
+We can visualise graphically the optimal growth, recalling that the energy 
+of the perturbation field at any given time $t$ is defined by means of the 
+inner product:
+%
+\begin{equation}
+E(\tau) =\frac{1}{2}(\mathbf{u}'(t), \mathbf{u}'(t)) 
+= \frac{1}{2} \int_\Omega \mathbf{u}' \cdot \mathbf{u}' dv
+\end{equation}
+%
+The solver can output the evolution of the energy of the perturbation 
+in time by using the \texttt{ModalEnergy} filter (defined in the \texttt{
+FILTERS} section of the XML file):
+
+\begin{minipage}{\linewidth}
+\begin{lstlisting}[style=XMLStyle]
+<FILTER TYPE="ModalEnergy">
+    <PARAM NAME="OutputFile">energy</PARAM>
+    <PARAM NAME="OutputFrequency">10</PARAM>
+</FILTER>
+\end{lstlisting}
+\end{minipage}
+
+This will write the energy of the perturbation every 10 time steps to the 
+file \texttt{energy.mld}. Repeating these simulations for different $\tau$ 
+with the optimal initial perturbation as the initial condition, it is possible 
+to create a plot similar to figure \ref{opt_curves}. Each curve necessarily 
+meets the optimal growth envelope (denoted by the circles) at its corresponding 
+value of $\tau$, and never exceeds it.
+
+The \texttt{\$NEKTUTORIAL/energy} folder contains the files \texttt{bfs\_energy\_tau01.xml} 
+and \texttt{bfs\_energy\_tau20.xml}, as well as the pre-computed optimal initial condition 
+for $\tau=20$ (\texttt{bfs\_energy\_tau20.rst}), with corresponding optimal growth of 2172.9.
+%
+\begin{figure}
+\centering
+\includegraphics[scale=0.8]{img/envelope.png}
+\caption{Envelope of two-dimensional optimal at $Re=500$ together with curves 
+of linear energy evolution starting from the three optimal initial conditions for
+specific values of $\tau$ 20, 60 and 100. Figure reproduced from J. Fluid. Mech.
+(2008), vol 603, $pp$. 271-304.}
+\label{opt_curves}
+\end{figure}
+%
+%
+\begin{tutorialtask}
+(Advanced/Optional) Generate energy curves for the optimal initial condition
+(leading eigenmode) computed in the previous task for $\tau=1$, and for
+$\tau=20$.
+
+Use your favourite plotting program (e.g. MATLAB or GNUPlot) to read in the
+files produced by the energy filter and plot the normalised energy growth
+curves.
+
+\smallskip
+
+\begin{tipbox}
+You will need to switch to using the \texttt{Standard} driver. You should also
+use the \texttt{Direct} evolution operator for this task, similar to the
+channel example.
+\end{tipbox}
+\end{tutorialtask}
+
+%
+Examine your plot. Verify the energy at time $t=\tau$ matches the 
+optimal growth in each case. Now examine the plot at time $t=1$. 
+Note that although the overall energy growth for the $\tau=20$ curve 
+is far greater than the corresponding $\tau=1$ curve, the $\tau=1$ 
+curve has greater growth at $t=\tau=1$.
+
+
+\end{document}

@@ -1,0 +1,543 @@
+\input{tutorial-preamble.tex}
+
+\newcommand{\Lcoord}{\eta}	        % local coordinate
+\newcommand{\LCcoord}{\xi}              % local cartesian coordinates
+\newcommand{\error}{\varepsilon}	% error u - u^\delta
+\newcommand{\qord}{q}		        % No. of quadrature points in total.
+\newcommand{\pspace}{{ P}}          % space of all polynomials
+\newcommand{\Qsp}{{Q}}	        % Structured region
+\newcommand{\cmap} {{\chi}}           % local to global coordinate mapping
+
+\title{Integration using Gaussian Quadrature}
+
+\begin{document}
+
+%\frontmatter
+
+% Render pretty title page if not building HTML
+\ifdefined\HCode
+\begin{center}
+    \includegraphics[width=0.1\textwidth]{img/icon-blue.png}
+\end{center}
+\maketitle
+\begin{center}
+       \huge{Nektar++ Tutorial}
+\end{center}
+\else
+\titlepage
+\fi
+
+\clearpage
+
+%\ifx\HCode\undefined
+%\tableofcontents*
+%\fi
+%
+%\clearpage
+
+\chapter{Introduction}
+
+Welcome to the tutorial on the fundamentals of the \nektar framework
+where we will look at how to perform 1D and 2D Gaussian Quadrature
+using the \nektar LibUtilities library.  If you have not already downloaded
+and installed \nektar, please do so by
+visiting \href{http://www.nektar.info}{http://www.nektar.info}, where you can
+also find the
+\href{http://www.nektar.info/downloads/8}{User-Guide} with the
+instructions on how to install the library.
+
+This tutorial requires:
+\begin{itemize}
+    \item \nektar compiled libraries and include files compiled from source so additional code can be compiled with the framework libraries
+\end{itemize}
+
+\section*{Goals}
+After completing this tutorial, you should be familiar with:
+\vspace{-0.5cm}
+\begin{itemize}
+\item The concept of Gaussian integration using classical Gauss and
+    Gauss-Lobatto rules in a standard interval  $\xi \in [-1,1]$; 
+\item Using the \nektar programming concepts of an \texttt{Array},
+    \texttt{PointsKey} and the \texttt{PointsManager} to generate Gaussian
+        quadrature weights;
+\item Integrating in the standard segment ($\xi \in [-1,1]$) and quadrilateral
+    region ($\xi \in [-1,1]\times [-1,1]$);
+\item The mathematical concept of mapping a general quadrilateral region to the standard region, evaluating the jacobian of this mapping and using this to evaluate an integral in a general straight sided quadrilateral region. 
+\end{itemize}
+
+\begin{tutorialtask}
+Prepare for the tutorial. Make sure that you have:
+\begin{itemize}
+    \item Installed and tested \nektar v\nekver{} compiled from source. We
+      will refer to the directory where you installed \nektar
+      as \inlsh{\$NEKDIST} for the remainder of the tutorial.
+
+The tutorial folder also contains: 
+\begin{itemize}
+\item CMakeList.txt
+\item LocIntegration2D.cpp
+\item StdIntegration1D.cpp
+\item StdIntegration2D.cpp
+\end{itemize}
+
+\item  Make a directory of your chosing, for example \inlsh{tutorial}, and download the tutorial files from
+        \relurl{fundamentals-integration.tar.gz}{fundamentals/integration}
+        into this directory.
+
+\item Unpack the tutorial files by using
+      \tutorialcommand{tar -xzvf fundamentals-integration.tar.gz} to produce a
+      directory \inlsh{fundamentals-integration} with subdirectories
+      called \inlsh{tutorial} and \inlsh{complete}.
+
+  \item Change to the 
+      
+      \inlsh{fundamentals-integration/tutorial}
+        
+      directory and
+      configure the tutorial examples for compilation by typing the command
+\tutorialcommand{cmake -DCMAKE\_PREFIX\_PATH=\$NEKDIST/build .}  You should now see a file called \inlsh{Makefile} in this directory. 
+
+\item Change to the 
+    
+    \inlsh{\$NEKDIST/tutorial/fundamentals-integration/complete} 
+        
+    directory and
+    configure the completed version of the tutorial examples for compilation by again typing the command \tutorialcommand{cmake -DCMAKE\_PREFIX\_PATH=\$NEKDIST/build}  You should now see a file called \inlsh{Makefile} in this directory. 
+\end{itemize}
+\end{tutorialtask}
+
+
+\chapter{Integration on a one-dimensional standard region}
+
+In our finite element formulation we typically require a technique to
+evaluate, within each elemental domain, integrals of the form
+%
+\begin{equation}
+	\int^{1}_{-1} u(\LCcoord) d \LCcoord,
+\label{eqn.int1}
+\end{equation}
+
+where $u(\LCcoord)$ may well be made up of products of polynomial
+bases. Since the form of $u(\LCcoord)$ is problem specific, we need an
+automated way to evaluate such integrals. This suggests the use of
+numerical integration or {\em quadrature}. The fundamental building
+block is the approximation of the integral by a finite summation of
+the form
+%
+\[
+\int^{1}_{-1} u(\LCcoord) d \LCcoord \approx 
+\sum_{i=0}^{\qord-1} w_i u(\LCcoord_i),
+\]
+%
+where $w_i$ are specified constants or {\em weights} and $\LCcoord_i$
+represents an abscissa of $\qord$ distinct points in the interval
+$-1\leq \LCcoord_i \leq 1$.  Although there are many different types
+of numerical integration we shall restrict our attention to {\em
+Gaussian quadrature}.
+
+\section{Gaussian Quadrature}
+\label{sec.gaussquad}
+
+
+Gaussian quadrature is a particularly accurate method for treating
+integrals where the integrand, $u(\LCcoord)$, is smooth. In this
+technique the integrand is represented as a Lagrange polynomial using the $\qord$ points $\LCcoord_i$, which
+are to be specified, that is,
+%
+\begin{equation}
+u(\LCcoord) = \sum^{\qord-1}_{i=0} u(\LCcoord_i) h_i(\LCcoord) + \error(u), 
+\label{eqn.appx}
+\end{equation}
+%
+where $\error(u)$ is the approximation error. If we substitute
+equation (\ref{eqn.appx}) into (\ref{eqn.int1}) we obtain a
+representation of the integral as a summation:
+
+\begin{equation}
+\int^{1}_{-1} u(\LCcoord) d \LCcoord = \sum_{i=0}^{\qord-1} w_i u(\LCcoord_i)
++ R(u),
+\label{eqn.int2}
+\end{equation}
+%
+where
+%
+\begin{eqnarray}
+	w_i  &=& \int^{1}_{-1} h_i(\LCcoord) d\LCcoord,
+\label{eqn.weights}    \\
+	R(u) &=& \int^{1}_{-1} \error(u) d\LCcoord.
+\label{eqn.remaninder}
+\end{eqnarray}
+
+Equation (\ref{eqn.weights}) defines the weights $w_i$ in terms of the
+integral of the Lagrange polynomial but to perform this integration we
+need to know the location of the abscissae or zeros
+$\LCcoord_i$. Since $u(\LCcoord)$ is represented by a polynomial of
+order $(\qord-1)$ we would expect the relation above to be exact if
+$u(\LCcoord)$ is a polynomial of order $(\qord-1)$ or less [that is,
+when $u(\LCcoord) \in
+\pspace_{\qord-1}([-1,1])$ then $R(u) = 0$]. This would be true if,
+for example, we choose the points so that they are equispaced in the
+interval. There is, however, a better choice of zeros which permits
+exact integration of polynomials of higher order than $(\qord-1)$.  This
+remarkable fact was first recognised by Gauss and is at the heart of
+Gaussian quadrature.
+
+We here consider only the result of the Gauss quadrature for integrals
+of the type shown in equation (\ref{eqn.int2}) known as Legendre
+integration. There are three different types of Gauss quadrature known
+as Gauss, Gauss-Radau, and Gauss-Lobatto, respectively. The difference
+between the three types of quadrature lies in the choice of the zeros.
+Gauss quadrature uses zeros which have points that are interior to the
+interval, $-1 < \LCcoord_i < 1$ for $i=0,\dots,\qord-1$. In
+Gauss-Radau the zeros include one of the end-points of the interval,
+usually $\LCcoord=-1$, and in Gauss-Lobatto the zeros include both end
+points of the interval, that is, $\LCcoord = \pm1$.
+
+Introducing $\LCcoord^{\alpha,\beta}_{i,P}$ to denote the $P$ zeros of
+the $P^{{ th}}$ order Jacobi polynomial $P^{\alpha,\beta}_P$ such that
+\[
+	P^{\alpha,\beta}_{P}(\LCcoord^{\alpha,\beta}_{i,P}) = 0,  
+\hspace{8mm} i = 0,1,\dots,P-1, 
+\]
+where 
+\[ \LCcoord^{\alpha,\beta}_{0,P} <\LCcoord^{\alpha,\beta}_{1,P} < \dots <
+\LCcoord^{\alpha,\beta}_{P-1,P}, \]
+%
+we can define zeros and weights which approximate the integral
+\[
+\int^{1}_{-1} u(\LCcoord) d \LCcoord = \sum_{i=0}^{\qord-1} w_i u(\LCcoord_i)
++ R(u),
+\]
+as:
+
+\noindent (1) {\em Gauss-Legendre}
+\begin{eqnarray*}
+\LCcoord_i & = & \LCcoord^{0,0}_{i,\qord} 
+\hspace{1cm} i = 0,\dots,\qord-1\\
+\\
+w^{0,0}_i & = & \frac{2}{ [1-(\LCcoord_i)^2]}
+\left [ \frac{d}{d\LCcoord} \left . \left ( L_{\qord}(\LCcoord) \right )
+\right |_{\LCcoord=\LCcoord_i} \right ]^{-2} \hspace{1cm} i = 0,\dots,\qord-1\\
+\\
+ R(u) &=& 0 \mbox{ \hspace{5mm} if } u(\LCcoord) \in
+ \pspace_{2\qord-1}([-1,1]) \end{eqnarray*}
+
+\noindent (2) {\em Gauss-Radau-Legendre}
+\begin{eqnarray*}
+	\LCcoord_i &=& \left \{ 
+	\begin{array}{ll}
+	 -1  &  i = 0\\
+\\
+	\LCcoord^{0,1}_{i-1,\qord-1} & i = 1,\dots,\qord-1
+		\end{array}  \right . \\
+	w^{0,0}_i & = & \frac{(1-\LCcoord_i)}{ \qord^2 [L_{\qord-1}(\LCcoord_i)]^2} 
+	\hspace{1cm} i = 0,\dots,\qord-1 \\
+\\
+ R(u) &=& 0 \mbox{ \hspace{5mm} if } u(\LCcoord) \in \pspace_{2\qord-2}([-1,1])
+\end{eqnarray*}
+
+{\noindent (3) {\em Gauss-Lobatto-Legendre}
+\begin{eqnarray*}
+	\LCcoord_i &=& \left \{ 
+	\begin{array}{ll}
+	 -1  &  i = 0\\
+\\
+	\LCcoord^{1,1}_{i-1,\qord-2} & i = 1,\dots,\qord-2 \\
+	  1  &  i = \qord-1
+	\end{array}  \right . \\
+\\
+	w^{0,0}_i & = &  \frac{2}{ \qord(\qord-1) [ L_{\qord-1}(\LCcoord_i)]^2} 
+	\hspace{1cm} i = 0,\dots,\qord-1 \\
+ R(u) &=& 0 \mbox{ \hspace{5mm} if } u(\LCcoord) \in \pspace_{2\qord-3}([-1,1])
+\end{eqnarray*}
+}
+
+
+In all of the above quadrature formulae $L_{\qord}(\LCcoord)$ is the
+Legendre polynomial ($L_{\qord}(\LCcoord) =
+P^{0,0}_{\qord}(\LCcoord)$). The zeros of the Jacobi polynomial
+$\LCcoord^{\alpha,\beta}_{i,m}$ do not have an analytic form and
+commonly the zeros and weights are tabulated.  Tabulation of data can
+lead to copying errors and therefore a better way to evaluate the
+zeros is by the use of a numerical algorithm (see the appendix in
+``Spectral/hp element methods for CFD'').
+
+\chapter{Computational Exercises}
+
+\section{One dimensional integration in a standard segment}
+In this first exercise we will demonstrate how to integrate the
+function $f(\xi) = \xi^{12}$ on the standard segment $\xi \in [-1,1]$
+using Gaussian quadrature. The Gaussian quadrature weights and zeros
+are coded in the \inlsh{LIbUtilities} library and for future reference
+this can be found under the
+directory \inlsh{\$NEKDIST/library/LibUtilities/Foundations/}. For the
+following exercises we will access the zero and points from the
+\texttt{PointsManager}. The \texttt{PointsManager} is a type of map (or manager) which
+requires a key defining known Gaussian quadrature types
+called \texttt{PointsKey}.
+
+
+In the \inlsh{\$NEKDIST/tutorial/fundamentals-integration/tutorial} directory
+open the file named \inlsh{StdIntegration1D.cpp}. Look over the comments
+supplied in the file which outline how to define the number of
+quadrature points to apply, the type of Gaussian quadrature and some
+arrays to hold the zeros, weights and solution. Finally
+a \inlsh{PointsKey} is defined which is then used to obtain the zeros
+and weights in two arrays called \inlsh{quadZeros}
+and \inlsh{quadWeights}.
+
+\begin{tutorialtask}
+
+Implement a short block of code where you see  the comments \inlsh{``Write your code here''} which evaluates the loop
+\[
+\int^1_{-1}  f(\xi)d\xi \simeq \sum_{i=0}^{i < Q_{max}} w_i f(z_i).
+\]
+\end{tutorialtask}
+
+To compile your code type
+\tutorialcommand{make StdIntegation1D}
+in the tutorial directory. When your code compiles successfully\footnote{If
+you are unable to get your code to compile you can see a completed
+exercise in the
+\inlsh{\$NEKDIST/tutorial/fundamentals-integration/completed}
+directory. The tutorial code is contained within a \inlsh{\#if
+WITHSOLUTION} block} then type
+\tutorialcommand{./StdIntegration1D}
+
+You should now get some output similar to
+\begin{lstlisting}[style=BashInputStyle]
+======================================================
+|        INTEGRATION ON A 1D STANDARD REGION         |
+======================================================
+Integrate the function f(xi) = xi^12 on the standard 
+segment xi=[-1,1] with Gaussian quadrature
+	 Q = 4: Error = 0.179594
+\end{lstlisting}
+
+
+
+\begin{tutorialtask}
+Evaluate the previous integral for a quadrature order of $Q = Q_{\max}$
+where $Q_{\max}=7$ is the number of quadrature points required for an
+exact evaluation of the integral (calculate this value
+analytically). Verify that the error is zero (up to numerical
+precision).
+\end{tutorialtask}
+
+We can also use Gauss-Lobatto-Legendre type integration rather than
+Gauss-Legendre type in the previous exercises. To do this we replace
+\begin{lstlisting}[language=C++]
+LibUtilities::PointsType quadPointsType =
+                         LibUtilities::eGaussGaussLegendre;
+\end{lstlisting}
+with 
+\begin{lstlisting}[language=C++]
+LibUtilities::PointsType quadPointsType =
+                         LibUtilities::eGaussLobattoLegendre;
+\end{lstlisting}
+
+
+\begin{tutorialtask}
+Evaluate the previous integral for a quadrature order of $Q = Q_{\max}$
+where $Q_{\max}=7$ and $8$ to verify that to exactly integrate with Gauss-Lobatto type integration you require an additional quadrature point and weights.
+  \end{tutorialtask}
+
+\section{Two-dimensional integration in a standard and local region}
+
+\subsection{Quadrilateral element in a standard region}
+
+A straightforward extension of the one-dimensional Gaussian rule is to the
+two-dimensional standard quadrilateral region and similarly to the
+three-dimensional hexahedral region. Integration over $\Qsp^2 =
+\{-1 \leq \LCcoord_1,\LCcoord_2 \leq 1\}$ is mathematically defined as two 
+one-dimensional integrals of the form
+\[
+\int_{Q^2} u(\LCcoord_1,\LCcoord_2)\  d\LCcoord_1 \ d\LCcoord_2 = 
+\int^1_{-1}  \left \{ \left . \int^1_{-1} u(\LCcoord_1,\LCcoord_2)\right |_{\LCcoord_2} \  d \LCcoord_1 \right \}  d \LCcoord_2.
+\]
+So if we replace the right-hand-side integrals with our
+one-dimensional Gaussian integration rules we obtain
+\[
+\int_{Q^2} u(\LCcoord_1,\LCcoord_2)\  d\LCcoord_1 \ d\LCcoord_2 \simeq
+\sum^{\qord_1-1}_{i=0} w_{i}\left \{ \sum^{\qord_2-1}_{j=0}
+w_{j}\  u(\LCcoord_{1i},\LCcoord_{2j}) \right \},  
+\]
+%
+where $\qord_1$ and $\qord_2$ are the number of quadrature points in
+the $\LCcoord_1$ and $\LCcoord_2$ directions. This expression will be
+exact if $u(\LCcoord_1,\LCcoord_2)$ is a polynomial and
+$\qord_1,\qord_2$ are chosen appropriately.  To numerically evaluate
+this expression the summation over `$i$' must be performed $\qord_1$
+times at every $\LCcoord_{2i}$ point, that is,
+\begin{eqnarray*}
+\int_{Q^2} u(\LCcoord_1,\LCcoord_2)\  d\LCcoord_1 \ d\LCcoord_2 & \simeq &
+\sum^{\qord_1-1}_{i=0} w_{i} \ f(\LCcoord_{1i}), \\
+f(\LCcoord_{1i}) & = & 
+\sum^{\qord_2-1}_{j=0}w_{j}\ u(\LCcoord_{1i},\LCcoord_{2j}). 
+\end{eqnarray*}
+%
+
+\begin{tutorialtask}
+Integrate the function $f(\xi_1,\xi_2)
+= \xi_1^{12}\, \xi_2^{14}$ on the standard quadrilateral element
+$\Qsp \in [-1,1]\times[-1,1]$ using Gaussian quadrature.
+
+Using a series of one-dimensional Gaussian quadrature rules as
+outlined above evaluate the integral by completing the first part of
+the code in the file \inlsh{StdIntegration2D.cpp} in the
+    directory
+    
+\inlsh{\$NekDist/tutorial/fundamentals-integration/tutorial}.
+
+The quadrature weights and zeros in each of the coordinate directions
+have already been setup and are initially set to $\qord_1=6,\qord_2=7$
+using a Gauss-Lobatto-Legendre quadrature rule. Complete the code by writing
+a structure of loops which implement the two-dimensional Gaussian
+quadrature rule\footnote{If you need help there is a completed version in the completed directory}. The expected  output is given below). Also verify that the
+error is zero when $\qord_1 = 8,\qord_2 = 9$.
+
+Recall that to compile the file you type
+\tutorialcommand{make StdIntegration2D}
+\end{tutorialtask}
+
+When executing the tutorial with the quadrature order
+$\qord_1=6,\qord_2=7$ you should get an output of the form:
+
+\begin{lstlisting}[style=BashInputStyle]
+=============================================================
+|        INTEGRATION ON 2 DIMENSIONAL ELEMENTS              |
+=============================================================
+
+Integrate the function f(x1,x2) = (x1)^12*(x2)^14
+on the standard quadrilateral element:
+	 q1 = 6, q2 = 7: Error = 0.00178972
+\end{lstlisting}
+
+\subsection{General straight-sided quadrilateral element}
+
+\begin{figure}[h!]
+\begin{center}
+\includegraphics[width=5cm]{img/quadmap}
+\caption{To construct a $C^0$ expansion from multiple elements 
+of specified shapes (for example, triangles or rectangles), each
+elemental region $\Omega^e$ is mapped to a standard region
+$\Omega_{st}$ in which all local operations are evaluated.}
+\label{fig.elementmap}
+\end{center}
+\end{figure}
+
+For elemental shapes with straight sides a simple mapping may be
+constructed using a linear mapping similar to the vertex modes of a
+hierarchical/modal expansion.  For the straight-sided quadrilateral
+with vertices labeled as shown in figure
+\ref{fig.elementmap}(b) the mapping can be defined as:
+\begin{eqnarray}
+x_i &=& \cmap_i(\LCcoord_1,\LCcoord_2) =
+  x_i^A \frac{(1-\LCcoord_1)}{2} \frac{(1-\LCcoord_2)}{2}
++ x_i^B \frac{(1+\LCcoord_1)}{2} \frac{(1-\LCcoord_2)}{2} \nonumber \\
+&& + x_i^D \frac{(1-\LCcoord_1)}{2} \frac{(1+\LCcoord_2)}{2}
++ x_i^C \frac{(1+\LCcoord_1)}{2} \frac{(1+\LCcoord_2)}{2}.\hspace{5mm} i = 1,2
+\label{eqn.quadmap}
+\end{eqnarray}
+
+If we denote an arbitrary quadrilateral region by $\Omega^e$ which is
+a function of the global Cartesian coordinate system $(x_1,x_2)$ in
+two-dimensions. To integrate over $\Omega^e$ we transform this region
+into the standard region $\Omega_{st}$ defined in terms of
+$(\LCcoord_1,\LCcoord_2)$ and we have
+%
+\[
+\int_{\Omega^e} u(x_1,x_2)\ dx_1 \  dx_2  = \int_{\Omega_{st}}
+u(\LCcoord_1,\LCcoord_2) |J_{2D}|\  d \LCcoord_1 \ d\LCcoord_2, 
+\]
+%
+where $J_{2D}$ is the two-dimensional Jacobian due to
+the transformation, defined as:
+%
+\begin{equation}
+J_{2D} = \left | \begin{array}{cc} 
+ \displaystyle \frac{\partial x_1}{\partial \LCcoord_1} & 
+ \displaystyle \frac{\partial x_1}{\partial \LCcoord_2} \\
+ \displaystyle \frac{\partial x_2}{\partial \LCcoord_1} & 
+ \displaystyle \frac{\partial x_2}{\partial \LCcoord_2} 
+\end{array} \right |  = 
+\frac{\partial x_1}{\partial \LCcoord_1} 
+\frac{\partial x_2}{\partial \LCcoord_2} - 
+\frac{\partial x_1}{\partial \LCcoord_2} 
+\frac{\partial x_2}{\partial \LCcoord_1} .
+\label{eqn.2djac}
+\end{equation}
+As we have assumed that we know the form of the mapping [i.e.,  $x_1 = 
+\cmap_1(\LCcoord_1,\LCcoord_2)$, $ x_2 = \cmap_2(\LCcoord_1,\LCcoord_2)$]
+we can evaluate all the partial derivatives required to determine
+the Jacobian. If the elemental
+region is straight-sided then we have seen that a mapping from
+($x_1,x_2$) $\rightarrow$ ($\LCcoord_1,\LCcoord_2$) is given by
+equations (\ref{eqn.quadmap}). 
+
+\begin{tutorialtask}
+We now consider how to integrate the function $f(x_1,x_2) = x_1^{12}\,
+x_2^{14}$ on a {\em local} rectangular quadrilateral element using
+Gaussian quadrature.  Consider the local quadrilateral element with
+vertices
+\begin{eqnarray*}
+(x^A_1, x^A_2) = (0,-1),&&  (x^B_1 , x^B_2) = (1,-1),\\
+(x^C_1 ,x^C_2) = (1,1), && (x^D_1 ,x^D_2) = (0,0).
+\end{eqnarray*}
+
+This is clearly similar to the previous exercise. However, as we are
+calculating the integral of a function defined on a local element
+rather than on a reference element, we have to take into account the
+geometry of the element. Therefore, the implementation is altered in
+two ways:
+\begin{enumerate}
+\item  The quadrature zeros should be transformed to local
+coordinates to evaluate the integrand $f(x_1, x_2)$ at the quadrature
+points.
+\item  The Jacobian of the transformation between local and
+reference coordinates should be taken into account when evaluating the
+integral.
+\end{enumerate}
+
+In the file \inlsh{LocIntegration2D.cpp} you are provided with the
+same set up as the previous task but now with a definition of the
+coordinate mapping included. Evaluate the expression for the Jacobian
+analytically. Then write a line of code in the loop for the Jacobian
+as indicated by the comments \inlsh{``Write your code here''}. When
+you have written your expression you can compile the code with the
+command
+
+\tutorialcommand{make LocIntegration2D}
+
+Verify that the error is not equal to zero when $\qord_1 = 8, \qord_2
+= 9$. Why might this be the case?\footnote{Hint: What is the function
+in terms of $\xi_1,\xi_2$ and what is the polynomial degree of the
+Jacobian?}.
+\end{tutorialtask}
+
+\newpage
+Using the  quadrature order specified in the file your output should look like:
+
+\begin{lstlisting}[style=BashInputStyle]
+===========================================================
+|      INTEGRATION ON 2D ELEMENT in Local Region          |
+===========================================================
+
+Integrate the function f(x1,x2) = x1^12 * x2^14 
+on a local quadrilateral element:
+	 Error = 0.000424657
+\end{lstlisting}
+
+
+\chapter{Summary}
+You should be now familiar with the following topics:
+\vspace{-0.5cm}
+\begin{itemize}
+    \item Defining an \texttt{Array} and a \texttt{PointsKey} in \nektar. 
+    \item Use the \texttt{PointsManager} with a \texttt{PointsKey} to get hold of quadrature weights and zeros. 
+\item Integrate a polynomial function in the standard region  $\xi\in [-1,1]$ using Gauss-Gauss-Legendre and Gauss-Lobatto-Legendre quadrature.
+\item Extend the standard region to a standard quadrilateral region.
+\item Introduce a linear mapping from a general quadrilateral region to the standard quadrilateral region. Evaluate the Jacobian of this mapping and evaluate an integral in a general straight sided quadrilateral region. 
+\end{itemize}
+
+\end{document}
